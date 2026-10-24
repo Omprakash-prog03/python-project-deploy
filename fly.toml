@@ -13,6 +13,10 @@ primary_region = "bom"
   DATABASE_URL = "sqlite:////data/platevision.db"
   SEED_DEMO_DATA = "true"
   ALPR_DEFAULT_COUNTRY = "IN"
+  # Schema is prepared once by the entrypoint; one worker keeps SQLite happy.
+  BOOTSTRAP_ON_START = "false"
+  WEB_CONCURRENCY = "1"
+  COOKIE_SECURE = "true"
 
 [[mounts]]
   source = "platevision_data"

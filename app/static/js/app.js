@@ -12,6 +12,7 @@
 
   const state = {
     user: null,
+    config: null,
     view: 'overview',
     range: '7d',
     overview: null,
@@ -116,12 +117,36 @@
   }
 
   /* ------------------------------------------------------------------ auth */
+  async function loadPublicConfig() {
+    try {
+      state.config = await fetch('/api/v1/config').then((r) => (r.ok ? r.json() : null));
+    } catch {
+      state.config = null;
+    }
+    const hint = $('#auth-hint');
+    if (!hint) return;
+    const cfg = state.config;
+    if (cfg && cfg.demo_login) {
+      hint.classList.remove('hidden');
+      $('#auth-hint-copy').innerHTML =
+        `This deployment has the demo workspace enabled` +
+        (cfg.demo_email ? ` for <code>${fmt.escape(cfg.demo_email)}</code>` : '') +
+        `. It ships with a live corridor, six cameras and a watchlist.`;
+      if (cfg.demo_email && !$('#email').value) $('#email').value = cfg.demo_email;
+    } else {
+      hint.classList.add('hidden');
+    }
+    if (cfg && cfg.app_name) document.title = `${cfg.app_name} · Sign in`;
+  }
+
   function showAuth() {
     $('#auth-screen').classList.remove('hidden');
     $('#app-shell').classList.add('hidden');
+    if (!state.config) loadPublicConfig();
   }
 
   async function boot() {
+    await loadPublicConfig();
     try {
       state.user = await api('/auth/me');
       await enterApp();
@@ -159,6 +184,7 @@
         method: 'POST',
         body: { email: $('#email').value.trim(), password: $('#password').value },
       });
+      $('#password').value = '';
       state.user = result.user;
       await enterApp();
       toast('Welcome back');
@@ -167,6 +193,23 @@
     } finally {
       button.disabled = false;
       button.textContent = 'Enter workspace';
+    }
+  });
+
+  $('#demo-login-btn')?.addEventListener('click', async () => {
+    const button = $('#demo-login-btn');
+    button.disabled = true;
+    button.textContent = 'Opening…';
+    try {
+      const result = await api('/auth/demo', { method: 'POST' });
+      state.user = result.user;
+      await enterApp();
+      toast('Demo workspace ready');
+    } catch (error) {
+      toast(error.message || 'Demo access is disabled on this deployment', 'error');
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Use the demo workspace';
     }
   });
 

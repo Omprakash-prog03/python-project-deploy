@@ -33,21 +33,24 @@
           </svg>
         </div>
         <h1>Welcome back</h1>
-        <p>Sign in to the Meridian traffic workspace.</p>
+        <p id="auth-sub">Sign in to your traffic operations workspace.</p>
         <div class="field">
           <label for="email">Work email</label>
-          <input id="email" name="email" type="email" value="elara@platevision.io" required />
+          <input id="email" name="email" type="email" autocomplete="username"
+                 placeholder="you@authority.gov" required />
         </div>
         <div class="field">
           <label for="password">Password</label>
-          <input id="password" name="password" type="password" value="nightwatch" required />
+          <input id="password" name="password" type="password" autocomplete="current-password"
+                 placeholder="••••••••" required />
         </div>
         <button class="btn btn-primary btn-block" type="submit" id="login-btn" style="margin-top:6px">
           Enter workspace
         </button>
-        <div class="auth-hint">
-          Demo credentials are pre-filled — <code>elara@platevision.io</code> / <code>nightwatch</code>.
-          The workspace ships with 34 recognised captures, six cameras and a live watchlist.
+        <div class="auth-hint hidden" id="auth-hint">
+          <span id="auth-hint-copy"></span>
+          <button class="btn btn-ghost btn-sm" type="button" id="demo-login-btn"
+                  style="margin-top:10px">Use the demo workspace</button>
         </div>
       </form>
     </div>

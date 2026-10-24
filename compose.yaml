@@ -15,11 +15,14 @@ services:
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       SECRET_KEY: ${SECRET_KEY:-dev-only-change-me-6f1c9a2e8b4d7f0a3c5e9b1d}
+      # The entrypoint creates/migrates the schema once, before workers fork.
+      BOOTSTRAP_ON_START: "false"
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://platevision:platevision@db:5432/platevision}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       STORAGE_DIR: /app/storage/uploads
       MODEL_CACHE_DIR: /app/storage/models
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
       ALPR_DEFAULT_COUNTRY: ${ALPR_DEFAULT_COUNTRY:-IN}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
       ALLOW_DEMO_LOGIN: ${ALLOW_DEMO_LOGIN:-true}

@@ -1,0 +1,246 @@
+# ---------------------------------------------------------------------------
+# Kubernetes manifests for PlateVision.
+#
+#   kubectl create secret generic platevision-secrets \
+#     --from-literal=SECRET_KEY="$(openssl rand -hex 32)" \
+#     --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+#   kubectl apply -f k8s/platevision.yaml
+#
+# Postgres is shown as an in-cluster StatefulSet for a self-contained install.
+# For production, point DATABASE_URL at a managed instance and delete the
+# database objects below.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platevision
+  labels:
+    app.kubernetes.io/name: platevision
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platevision-config
+  namespace: platevision
+data:
+  ENVIRONMENT: "production"
+  PORT: "8000"
+  BOOTSTRAP_ON_START: "false"
+  DATABASE_URL: "postgresql+psycopg://platevision:$(POSTGRES_PASSWORD)@platevision-db:5432/platevision"
+  STORAGE_BACKEND: "local"
+  STORAGE_DIR: "/data/uploads"
+  MODEL_CACHE_DIR: "/data/models"
+  SEED_DEMO_DATA: "false"
+  ALLOW_DEMO_LOGIN: "false"
+  COOKIE_SECURE: "true"
+  CORS_ORIGINS: "https://plates.example.com"
+  ALLOWED_HOSTS: "plates.example.com,platevision.internal"
+  WEB_CONCURRENCY: "2"
+  ALPR_DEFAULT_COUNTRY: "IN"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: platevision-evidence
+  namespace: platevision
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 50Gi
+---
+# Evidence preparation. With >1 replica, use an ObjectBucketClaim / S3 backend
+# and drop this Job (the init container handles migrations per pod instead).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: platevision-init
+  namespace: platevision
+  annotations:
+    # Re-run on every deploy: `kubectl delete job platevision-init` or use Argo CD hooks.
+    argocd.argoproj.io/hook: PreSync
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+        - name: init
+          image: ghcr.io/example/platevision:1.0.0
+          imagePullPolicy: IfNotPresent
+          command: ["python", "scripts/init_db.py"]
+          envFrom:
+            - configMapRef:
+                name: platevision-config
+            - secretRef:
+                name: platevision-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: platevision-evidence
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platevision
+  namespace: platevision
+  labels:
+    app.kubernetes.io/name: platevision
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platevision
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: platevision
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: platevision
+      containers:
+        - name: api
+          image: ghcr.io/example/platevision:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: platevision-config
+            - secretRef:
+                name: platevision-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet: { path: /api/v1/health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                # Let the load balancer drain before uvicorn gets SIGTERM.
+                command: ["sh", "-c", "sleep 5"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: platevision-evidence
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platevision
+  namespace: platevision
+spec:
+  selector:
+    app.kubernetes.io/name: platevision
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: platevision
+  namespace: platevision
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["plates.example.com"]
+      secretName: platevision-tls
+  rules:
+    - host: plates.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: platevision
+                port:
+                  number: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: platevision
+  namespace: platevision
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platevision
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: platevision
+  namespace: platevision
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: platevision
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

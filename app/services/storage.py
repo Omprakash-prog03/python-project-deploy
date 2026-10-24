@@ -30,12 +30,27 @@ class StorageService:
                     region_name=settings.s3_region,
                     endpoint_url=settings.s3_endpoint_url,
                 )
-            except Exception as exc:  # pragma: no cover
+                self._verify_bucket()
+            except Exception as exc:  # pragma: no cover - depends on infrastructure
+                # Silently writing evidence to a container's ephemeral disk in
+                # production would lose captures on the next deploy, so this is
+                # a hard failure there and a loud fallback in development.
+                if settings.is_production:
+                    raise RuntimeError(
+                        "STORAGE_BACKEND=s3 is configured but object storage is "
+                        f"unreachable: {exc}. Install the extra (pip install -r "
+                        "requirements-s3.txt or build with --build-arg INSTALL_S3=1) "
+                        "and check the bucket/credentials."
+                    ) from exc
                 logger.error("S3 backend unavailable, falling back to local disk: %s", exc)
                 self.backend = "local"
                 self._client = None
         else:
             self._client = None
+
+    def _verify_bucket(self) -> None:  # pragma: no cover - network dependency
+        assert self._client is not None
+        self._client.head_bucket(Bucket=settings.s3_bucket)
 
     # ------------------------------------------------------------------ write
     def save(self, data: bytes, *, org_id: str, suffix: str = ".jpg") -> tuple[str, int]:

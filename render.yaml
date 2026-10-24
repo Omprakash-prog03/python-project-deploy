@@ -26,6 +26,10 @@ services:
         value: "true"
       - key: COOKIE_SECURE
         value: "true"
+      - key: BOOTSTRAP_ON_START
+        value: "false"
+      - key: WEB_CONCURRENCY
+        value: "2"
     disk:
       name: platevision-data
       mountPath: /var/data

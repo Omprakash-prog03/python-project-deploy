@@ -15,6 +15,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.router import api_router
 from app.core.config import PROJECT_ROOT, settings
@@ -52,7 +53,17 @@ async def lifespan(app: FastAPI):
     except Exception:  # pragma: no cover
         logger.warning("Glyph bank warm-up failed", exc_info=True)
     app.state.started_at = time.time()
-    logger.info("Ready — docs at /docs, console at /")
+    if settings.warnings:
+        logger.warning(
+            "Configuration advisories in %s: %s",
+            settings.environment,
+            ", ".join(settings.warnings),
+        )
+    logger.info(
+        "Ready — %s backend, storage=%s, engine warm. Docs at /docs, console at /",
+        settings.backend_kind,
+        settings.storage_backend,
+    )
     yield
     logger.info("Shutting down")
 
@@ -76,15 +87,20 @@ def create_app() -> FastAPI:
     )
     app.state.started_at = time.time()
 
+    # Outermost first: browsers reject `*` + credentials, so wildcard CORS is
+    # unavoidably credential-free. Same-origin console traffic is unaffected.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["X-Request-ID", "X-Response-Time", "X-Plate-Best"],
+        allow_credentials=settings.cors_allow_credentials,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"],
+        expose_headers=["X-Request-ID", "X-Response-Time", "X-Plate-Best", "X-Plate-Count"],
+        max_age=600,
     )
     app.add_middleware(GZipMiddleware, minimum_size=900)
+    if settings.allowed_host_list != ["*"]:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_host_list)
 
     @app.middleware("http")
     async def instrumentation(request: Request, call_next):
@@ -117,6 +133,11 @@ def create_app() -> FastAPI:
             "style-src 'self' 'unsafe-inline'; script-src 'self'; "
             "font-src 'self' data:; connect-src 'self'; frame-ancestors *"
         )
+        if request.url.path.startswith("/static/"):
+            # Versioned-by-content assets are safe to cache; the shell is not.
+            response.headers["Cache-Control"] = "public, max-age=86400, stale-while-revalidate=604800"
+        elif request.url.path in ("/", "/index.html"):
+            response.headers["Cache-Control"] = "no-cache"
         if settings.is_production:
             response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
         return response
@@ -172,6 +193,24 @@ def create_app() -> FastAPI:
     # ---------------------------------------------------------------- routes
     app.include_router(api_router)
 
+    @app.get("/api/v1/config", tags=["auth"], include_in_schema=True)
+    def public_config() -> dict:
+        """Unauthenticated runtime facts the sign-in screen needs.
+
+        Deliberately excludes anything sensitive: no secret derivation, no user
+        enumeration, no internal hostnames.
+        """
+        return {
+            "app_name": settings.app_name,
+            "tagline": settings.app_tagline,
+            "version": settings.version,
+            "environment": settings.environment,
+            "demo_login": bool(settings.allow_demo_login),
+            "demo_email": settings.demo_email if settings.allow_demo_login else None,
+            "countries": settings.country_list,
+            "max_upload_mb": settings.max_upload_mb,
+        }
+
     @app.get("/healthz", include_in_schema=False)
     def liveness() -> dict:
         return {"status": "alive", "version": settings.version}
@@ -188,11 +227,11 @@ def create_app() -> FastAPI:
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-    @app.get("/", include_in_schema=False)
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
 
-    @app.get("/favicon.ico", include_in_schema=False)
+    @app.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
     def favicon():
         icon = STATIC_DIR / "img" / "favicon.svg"
         if icon.exists():

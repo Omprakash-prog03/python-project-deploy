@@ -11,3 +11,8 @@ numpy==2.2.1
 opencv-python-headless==4.10.0.84
 httpx==0.28.1
 python-json-logger==3.2.1
+
+# ---- database drivers
+# psycopg(binary) ships the compiled libpq bindings, so the image needs no
+# build toolchain or system libpq to talk to Postgres.
+psycopg[binary]==3.2.3
