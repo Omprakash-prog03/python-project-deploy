@@ -1,0 +1,43 @@
+[project]
+name = "platevision"
+version = "1.0.0"
+description = "Commercial licence-plate intelligence platform: recognition, watchlist enforcement, analytics and audit."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "PlateVision" }]
+keywords = ["alpr", "anpr", "number-plate-recognition", "fastapi", "computer-vision"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["docs/legacy", "storage"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+  "E501",   # long lines are handled by the formatter
+  "B008",   # FastAPI dependency defaults
+  "SIM108", # ternary assignments are sometimes less readable
+  "RUF001", "RUF002", "RUF003",  # unicode punctuation in docstrings
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "S101"]
+"app/alpr/*" = ["B905"]  # zip() without strict= on numpy-derived sequences
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = ["ignore::DeprecationWarning", "ignore::PendingDeprecationWarning"]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/seed.py", "app/services/samples.py"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]

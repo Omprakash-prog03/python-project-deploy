@@ -1,0 +1,275 @@
+# ---------------------------------------------------------------------------
+# Kubernetes manifests for PlateVision (multi-replica reference deployment).
+#
+# Prerequisites
+#   1. A Postgres database (managed service recommended) and an evidence bucket.
+#   2. A secret holding the connection string and the app secret:
+#
+#        kubectl create namespace platevision
+#        kubectl -n platevision create secret generic platevision-secrets \
+#          --from-literal=SECRET_KEY="$(openssl rand -hex 32)" \
+#          --from-literal=DATABASE_URL="postgresql+psycopg://user:pass@db-host:5432/platevision"
+#
+#   3. An S3-compatible bucket for evidence. The pods use the AWS default
+#      credential chain — annotate the service account for IRSA (EKS), or add
+#      AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY to the secret for other clouds.
+#      The API refuses to start if the bucket is unreachable (no silent
+#      fallback to local disk), so create it first:
+#
+#        aws s3 mb s3://platevision-evidence --region ap-south-1
+#
+#   4. Build the image with the S3 extra:  docker build --build-arg INSTALL_S3=1 .
+#
+#   kubectl apply -f k8s/platevision.yaml
+#
+# Single-node variant (no object storage): set STORAGE_BACKEND=local,
+# STORAGE_DIR=/data/uploads in the ConfigMap, add a ReadWriteOnce PVC mounted at
+# /data in both the Job and the Deployment, and set replicas: 1 (SQLite is not
+# supported across replicas; the container already forces one worker per pod).
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platevision
+  labels:
+    app.kubernetes.io/name: platevision
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: platevision
+  namespace: platevision
+  # EKS IRSA example — replace with your role ARN:
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/platevision-evidence
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platevision-config
+  namespace: platevision
+data:
+  # Non-secret configuration only. DATABASE_URL and SECRET_KEY come from
+  # platevision-secrets (Kubernetes never expands $(VAR) inside a ConfigMap).
+  ENVIRONMENT: "production"
+  PORT: "8000"
+  BOOTSTRAP_ON_START: "false"          # the init Job prepares the schema
+  WEB_CONCURRENCY: "2"
+  STORAGE_BACKEND: "s3"
+  S3_BUCKET: "platevision-evidence"
+  S3_REGION: "ap-south-1"
+  STORAGE_DIR: "/data/uploads"         # scratch space; evidence goes to S3
+  MODEL_CACHE_DIR: "/data/models"
+  SEED_DEMO_DATA: "false"
+  ALLOW_DEMO_LOGIN: "false"
+  COOKIE_SECURE: "true"
+  CORS_ORIGINS: "https://plates.example.com"
+  ALLOWED_HOSTS: "plates.example.com,platevision.internal"
+  ALPR_DEFAULT_COUNTRY: "IN"
+---
+# Schema preparation. Runs once per release (Argo CD PreSync hook, or delete the
+# Job before applying if you deploy with plain kubectl). init_db.py waits for the
+# database, takes a Postgres advisory lock, and is safe to re-run.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: platevision-init
+  namespace: platevision
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: platevision
+        app.kubernetes.io/component: init
+    spec:
+      restartPolicy: Never
+      serviceAccountName: platevision
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: init
+          image: ghcr.io/example/platevision:1.0.0
+          imagePullPolicy: IfNotPresent
+          command: ["python", "scripts/init_db.py"]
+          envFrom:
+            - configMapRef:
+                name: platevision-config
+            - secretRef:
+                name: platevision-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platevision
+  namespace: platevision
+  labels:
+    app.kubernetes.io/name: platevision
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platevision
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: platevision
+    spec:
+      serviceAccountName: platevision
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: platevision
+      containers:
+        - name: api
+          image: ghcr.io/example/platevision:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: platevision-config
+            - secretRef:
+                name: platevision-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet: { path: /api/v1/health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                # Let the load balancer drain before uvicorn gets SIGTERM.
+                command: ["sh", "-c", "sleep 5"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platevision
+  namespace: platevision
+spec:
+  selector:
+    app.kubernetes.io/name: platevision
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: platevision
+  namespace: platevision
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["plates.example.com"]
+      secretName: platevision-tls
+  rules:
+    - host: plates.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: platevision
+                port:
+                  number: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: platevision
+  namespace: platevision
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platevision
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: platevision
+  namespace: platevision
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: platevision
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
