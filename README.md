@@ -29,7 +29,7 @@ no frames leaving your network.
 | **Self-hosted ALPR** | Detection, perspective rectification, character segmentation, hybrid template/k-NN classification and grammar-constrained decoding. No GPU, no model download, no network calls at inference. |
 | **Jurisdiction grammars** | India (HSRP, standard, commercial, BH-series, defence), US, UK, EU and generic fallbacks. Ambiguous glyphs (`O/0`, `I/1`, `B/8`, `S/5`, `Z/2`) are resolved with an edit-distance dynamic program, not by naive argmax. |
 | **Watchlist enforcement** | Stolen / banned / permit-lapsed / VIP / unpaid categories with severity, near-miss (1-character) matching, and live alerting. |
-| **Camera console** | One dark screen that opens into a live viewfinder: shutter, auto-scan, scan history, per-character confidence, correction-driven training, and server-rendered PDF evidence reports. |
+| **Camera console** | An iOS-style camera app that opens straight into a live viewfinder: shutter, scene-gated auto-scan, a Photos-style history grid, per-character confidence, correction-driven training, and server-rendered PDF evidence reports. |
 | **Multi-tenant & RBAC** | Organisation-scoped data, four roles (`viewer → operator → supervisor → admin`), JWT sessions or scoped API keys. |
 | **Audit trail** | Every login, capture, review, correction, export, key and webhook change is appended to an immutable log with request id and IP. |
 | **Signed webhooks** | `capture.created` and `watchlist.hit` delivered with HMAC-SHA256 signatures and retry/backoff. |
@@ -251,22 +251,31 @@ assert hmac.compare_digest(expected, request.headers["X-PlateVision-Signature"])
 
 ## Console
 
-The console (`app/static/`) is a camera, not a dashboard: one dark screen that opens straight
-into a live viewfinder. Dependency-free ES2020 — no build step, no CDN — so it works in
-air-gapped deployments.
+The console (`app/static/`) is a camera app, not a dashboard: it opens straight into a
+full-bleed viewfinder with an automatic demo session, and everything else is an iOS sheet
+sliding over it. Dependency-free ES2020 — no build step, no CDN — so it works in air-gapped
+deployments. Light and dark both follow the system; the viewfinder stays black regardless.
 
-* **Viewfinder** — rear camera via `getUserMedia`, crop marks, live plate read-out, and a
-  strip of recent scans sitting on the glass. Falls back to uploading an image when no camera
-  is available or permission is denied.
-* **Shutter** — captures a frame, posts it to `/captures`, and shows the read with
-  per-character confidence.
-* **Live scan** — optional auto mode reads the frame every ~3.2 s and de-duplicates a plate
-  seen within the last 20 s, so a parked car does not create a row per tick.
-* **Scan history** — every stored read, newest first, with thumbnails; tap any row for detail.
+* **Viewfinder** — rear camera via `getUserMedia`, crop marks, live plate read-out, torch and
+  camera flip. Falls back to the poster frame plus image import when no camera is available
+  or permission is denied.
+* **Shutter** — captures a frame, posts it to `/captures`, and raises the result sheet with
+  the plate, the overall confidence and per-character chips.
+* **Live scan** — optional auto mode. The interval adapts to the observed read time
+  (`max(2.6 s, last read x 1.5)`) so a slow instance is never queued, and each tick is
+  gated on a 32x18 luma fingerprint: an unchanged frame is skipped outright, so a parked car
+  does not create a row per tick. Auto-scan pauses while a sheet is open or the tab is hidden.
+* **Jurisdiction** — IN / US / UK / EU / ANY, sent with every frame so the reader applies the
+  right plate grammar.
+* **Scan history** — a Photos-style three-column grid under sticky day headers, with
+  All / Today / This week filters; tap any cell for detail.
 * **PDF export** — one evidence sheet per scan, or the whole history as a paginated
   contact sheet. Both generated server-side.
 * **Correct & train** — retype a plate and the misread glyphs become training data for that
   camera (see *Corrections train the reader*).
+
+On a screen 700 px or wider the camera renders as a phone-shaped column rather than a
+stretched banner, and sheets become popovers sized to that column.
 
 Cut deliberately: KPI tiles, charts, filters, sorting, watchlist UI, camera fleet and audit
 screens. The API still exposes all of it — the console just does not need it to scan a plate.
