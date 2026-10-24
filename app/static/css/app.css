@@ -471,7 +471,9 @@ svg {
     overflow: hidden;
   }
 
-  .sheet-layer { justify-content: center; }
+  /* The sheet is a popover at this size, so keep it inside the phone column
+     instead of letting it overhang the bezel. */
+  .sheet { max-width: 382px; }
 }
 
 /* ════════════════════════════════════════════════════════════ SHEETS ══ */
