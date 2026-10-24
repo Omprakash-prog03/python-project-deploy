@@ -130,10 +130,28 @@ Sample corpus: 15 plates rendered with the shipped fonts, in both a *clean* sett
 
 | Corpus | Exact match | Character accuracy | Warm latency (avg / p95) |
 |---|---|---|---|
-| Clean frames | **13/15 (86.7%)** | 90.0% | 114 ms / 159 ms |
-| Degraded frames | **11/15 (73.3%)** | 77.3% | 231 ms / 377 ms |
+| Clean frames | **15/15 (100%)** | 100.0% | 149 ms / 189 ms |
+| Degraded frames | **14/15 (93.3%)** | 99.3% | 154 ms / 182 ms |
 
 Reproduce with `make eval` / `make eval-deg` (or `python scripts/eval_alpr.py --degraded`).
+`scripts/tune_alpr.py` re-tunes the fusion weights against a 36-plate held-out corpus.
+
+Two defects dominated the miss rate and are fixed in this release: wide letters (`W`, `M`)
+were discarded by the text-line filter, and skewed frames smeared neighbouring glyphs into one
+blob. The reader now keeps any component up to 1.95:1 aspect and deskews the line before
+segmentation, which is why the degraded corpus went from 8/15 to 14/15.
+
+### Corrections train the reader
+
+Every verified correction is training data. `POST /api/v1/captures/{id}/teach` re-reads the
+stored frame, aligns the glyphs it produced against the corrected spelling (global alignment,
+substitutions only — a length change means segmentation failed, so nothing is learned), and
+stores those crops as exemplars for the correct class in
+`MODEL_CACHE_DIR/learned-glyphs-v1.npz`. The classifier scores them separately from the
+rendered bank and blends them at 0.65 weight, so one correction is not diluted by 90 synthetic
+templates. `GET /api/v1/learning` shows what has been learned; `DELETE /api/v1/learning`
+forgets it. The console exposes the same flow as **Correct plate · trains this camera** in the
+capture drawer.
 Every read also reports a confidence; low-confidence reads are routed to the review queue
 rather than silently trusted. For production deployments, add your own jurisdiction corpus to
 `scripts/eval_alpr.py` and calibrate `ALPR_REVIEW_CONFIDENCE` before enabling automation.
@@ -196,6 +214,8 @@ The response carries `watchlist_hit`, `risk_level`, `status` (`verified` / `pend
 | `GET` | `/api/v1/captures/{id}/image` | Evidence image (`?variant=thumb`) |
 | `PATCH` | `/api/v1/captures/{id}` | Verify / flag / deny, correct plate, add note |
 | `POST` | `/api/v1/captures/{id}/reanalyze` | Re-run inference on stored original |
+| `POST` | `/api/v1/captures/{id}/teach` | Correct the reading *and* train the glyph classifier |
+| `GET` | `/api/v1/learning` | Learned exemplar stats · `DELETE` resets them (admin) |
 | `GET` | `/api/v1/captures/export.csv` | Audited CSV export (≤10 000 rows) |
 | `POST` | `/api/v1/recognize` · `/recognize/annotated` | Stateless read / annotated JPEG |
 | `GET` | `/api/v1/recognize/samples` | Synthetic frames for demos & CI |

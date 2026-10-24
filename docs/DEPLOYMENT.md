@@ -178,10 +178,13 @@ cannot take concurrent writers. Raise `WEB_CONCURRENCY` only after moving to Pos
 
 ## 7. Render / Railway
 
-* **Render** — click the *Deploy to Render* button in the README (or create a Blueprint); the
-  blueprint provisions the Docker service, a 5 GB disk at `/var/data`, a generated `SECRET_KEY`,
-  `COOKIE_SECURE=true`, and one worker (SQLite). Add `DATABASE_URL` to move to Postgres and raise
-  `WEB_CONCURRENCY`. The image entrypoint still runs, so the schema is prepared before the worker.
+* **Render** — create a Blueprint from the repo; `render.yaml` ships as the **free** variant: no
+  disk, SQLite and evidence under `/app/storage` (ephemeral), generated `SECRET_KEY`,
+  `COOKIE_SECURE=true`, one worker. Free instances sleep after ~15 minutes idle and cold-start in
+  ~50 s. To move to a paid instance, switch `plan` to `starter`, uncomment the `disk:` block,
+  point `DATABASE_URL`/`STORAGE_DIR`/`MODEL_CACHE_DIR` at `/var/data`, and only then add a
+  managed Postgres and raise `WEB_CONCURRENCY`. The image entrypoint still runs, so the schema
+  is prepared before the worker.
 * **Railway** — `railway.json` selects the Dockerfile builder, `/healthz` health check and
   restart policy, and deliberately inherits the image CMD so the entrypoint runs (config
   validation, schema init, SQLite worker clamp). Mount a volume at `/data` and set
@@ -360,6 +363,18 @@ volume).
 | 5–40 cameras | 2–4 workers, Postgres, S3/R2 evidence |
 | 40+ cameras | 2–8 replicas behind a load balancer, Postgres, S3, Redis/infra rate limiting, move inference to a queue worker |
 
+### Learned glyphs
+
+Operator corrections are stored in `MODEL_CACHE_DIR/learned-glyphs-v1.npz` (bounded at 60
+exemplars per class, atomic writes). Two consequences for deployment:
+
+* On a **free tier with ephemeral disk**, learning lasts for the life of the instance and is
+  lost on redeploy — acceptable for a demo, but pin `MODEL_CACHE_DIR` to a volume/PVC if
+  corrections should survive.
+* In a **multi-replica** deployment each replica learns independently from the corrections it
+  serves. Share the file via the volume, or accept the drift; `GET /api/v1/learning` reports
+  what a given replica knows and `DELETE /api/v1/learning` resets it.
+
 ---
 
 ## 14. Backups and restore
@@ -369,6 +384,8 @@ volume).
 * **Evidence** — versioned bucket or `rsync` of `STORAGE_DIR`. Keys are date-partitioned, so
   lifecycle rules can implement retention without touching the database.
 * **Glyph cache** — disposable; rebuilds on boot.
+* **Learned glyphs** — small and rebuildable by re-correcting frames, but back it up if your
+  operators invested in a site-specific model.
 * **Restore drill** — restore the dump into a scratch database, point a container at it with the
   same bucket, run `python scripts/smoke.py --base http://localhost:8000`; all 14 checks must pass
   before you call the backup good.

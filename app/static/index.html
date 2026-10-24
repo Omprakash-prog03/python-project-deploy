@@ -3,511 +3,104 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="theme-color" content="#07060a" />
-<title>PlateVision · Plate Intelligence Platform</title>
-<meta name="description" content="Commercial licence-plate intelligence: recognition, watchlist enforcement, analytics and audit." />
+<meta name="theme-color" content="#F3EFE5" />
+<title>PlateVision · Plate Intelligence</title>
+<meta name="description" content="Licence-plate recognition, watchlist enforcement and evidence review — running on your own infrastructure." />
 <link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml" />
 <link rel="preload" href="/static/fonts/CormorantGaramond-Light.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="preload" href="/static/fonts/Inter-Variable.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="/static/css/app.css" />
 </head>
 <body>
-<div id="root">
-  <!-- ================================ LOGIN ================================ -->
-  <section id="auth-screen" class="auth-screen">
-    <div class="auth-visual">
-      <img src="/static/img/hero-dusk.jpg" alt="" />
-      <div class="auth-visual-copy">
-        <h2>Every plate,<br />seen clearly.</h2>
-        <p>Night-grade recognition, live watchlist enforcement and an audit trail regulators accept — running on your own infrastructure.</p>
-      </div>
-    </div>
-    <div class="auth-form-wrap">
-      <form id="login-form" class="auth-card" autocomplete="on">
-        <div class="brand-mark" style="margin-bottom:22px">
-          <svg viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="1.5">
-            <rect x="2.5" y="7" width="19" height="10" rx="2.5" />
-            <path d="M6 12h3M11 12h2M15 12h3" stroke-linecap="round" />
-            <circle cx="4.6" cy="10.2" r=".7" fill="#c9b8ff" stroke="none" />
-            <circle cx="19.4" cy="10.2" r=".7" fill="#c9b8ff" stroke="none" />
-          </svg>
-        </div>
-        <h1>Welcome back</h1>
-        <p id="auth-sub">Sign in to your traffic operations workspace.</p>
-        <div class="field">
-          <label for="email">Work email</label>
-          <input id="email" name="email" type="email" autocomplete="username"
-                 placeholder="you@authority.gov" required />
-        </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <input id="password" name="password" type="password" autocomplete="current-password"
-                 placeholder="••••••••" required />
-        </div>
-        <button class="btn btn-primary btn-block" type="submit" id="login-btn" style="margin-top:6px">
-          Enter workspace
-        </button>
-        <div class="auth-hint hidden" id="auth-hint">
-          <span id="auth-hint-copy"></span>
-          <button class="btn btn-ghost btn-sm" type="button" id="demo-login-btn"
-                  style="margin-top:10px">Use the demo workspace</button>
-        </div>
-      </form>
-    </div>
-  </section>
 
-  <!-- ================================= APP ================================= -->
-  <div class="app-shell hidden" id="app-shell">
-    <!-- rail -->
-    <aside class="rail">
-      <div class="brand-mark">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="1.5">
-          <rect x="2.5" y="7" width="19" height="10" rx="2.5" />
-          <path d="M6 12h3M11 12h2M15 12h3" stroke-linecap="round" />
-          <circle cx="4.6" cy="10.2" r=".7" fill="#c9b8ff" stroke="none" />
-          <circle cx="19.4" cy="10.2" r=".7" fill="#c9b8ff" stroke="none" />
-        </svg>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<!-- ================================ SIGN IN ================================ -->
+<section class="auth" id="auth-screen">
+  <header class="auth-bar">
+    <div class="brand"><span class="brand-glyph" aria-hidden="true"></span>PLATEVISION</div>
+    <div class="micro muted">PLATE INTELLIGENCE · 1.0</div>
+  </header>
+
+  <div class="auth-grid">
+    <form class="auth-card" id="login-form" autocomplete="on">
+      <div class="eyebrow"><span class="dot"></span>SECURE ACCESS</div>
+      <h1 class="display">Every&nbsp;plate,<br /><em>seen clearly.</em></h1>
+      <p class="lede" id="auth-sub">Sign in to your traffic operations workspace.</p>
+
+      <label class="field">
+        <span class="micro">WORK EMAIL</span>
+        <input id="email" name="email" type="email" autocomplete="username"
+               placeholder="you@authority.gov" required />
+      </label>
+
+      <label class="field">
+        <span class="micro">PASSWORD</span>
+        <input id="password" name="password" type="password" autocomplete="current-password"
+               placeholder="••••••••" required />
+      </label>
+
+      <button class="pill pill-dark pill-block" type="submit" id="login-btn">ENTER · WORKSPACE</button>
+
+      <div class="auth-hint hidden" id="auth-hint">
+        <span class="micro muted" id="auth-hint-copy"></span>
+        <button class="pill pill-ghost pill-block" type="button" id="demo-login-btn">USE · DEMO WORKSPACE</button>
       </div>
-      <nav class="rail-nav">
-        <button class="rail-btn active" data-view="overview" title="Overview">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M4 11.5 12 4l8 7.5" stroke-linecap="round" stroke-linejoin="round" />
-            <path d="M6.5 10.5V19h11v-8.5" stroke-linecap="round" />
-          </svg>
-          <span>Home</span>
-        </button>
-        <button class="rail-btn" data-view="scan" title="Scan">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" stroke-linecap="round" />
-            <path d="M4 12h16" stroke-linecap="round" opacity=".55" />
-          </svg>
-          <span>Scan</span>
-        </button>
-        <button class="rail-btn" data-view="library" title="Library">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="4" y="4" width="7" height="7" rx="1.6" />
-            <rect x="13" y="4" width="7" height="7" rx="1.6" />
-            <rect x="4" y="13" width="7" height="7" rx="1.6" />
-            <rect x="13" y="13" width="7" height="7" rx="1.6" />
-          </svg>
-          <span>Library</span>
-        </button>
-        <button class="rail-btn" data-view="watchlist" title="Watchlist">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M12 3.6 5 6.4v5.2c0 4 2.9 7.3 7 8.8 4.1-1.5 7-4.8 7-8.8V6.4L12 3.6Z" stroke-linejoin="round" />
-            <path d="m9.4 12.1 1.9 1.9 3.4-3.6" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-          <span>Watch</span>
-        </button>
-      </nav>
-      <div class="rail-foot">
-        <button class="rail-btn" id="logout-btn" title="Sign out">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M15 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2v-2" stroke-linecap="round" />
-            <path d="M10 12h10m0 0-3-3m3 3-3 3" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-          <span>Exit</span>
-        </button>
+
+      <p class="auth-note micro">LOCAL INFERENCE · NO FRAME LEAVES YOUR NETWORK</p>
+    </form>
+
+    <aside class="auth-aside" aria-hidden="true">
+      <figure class="photo-card">
+        <div class="photo-head">
+          <span class="micro"><span class="dot"></span>READY · FRAME 01</span>
+          <span class="micro muted">VC-SNAP-0421</span>
+        </div>
+        <div class="photo-body">
+          <img src="/static/img/hero-plate.jpg" alt="" />
+        </div>
+        <div class="photo-foot">
+          <span class="micro">F/2.0 · 1/120s</span>
+          <span class="micro">+0.0 EV</span>
+        </div>
+      </figure>
+      <div class="aside-meta">
+        <span class="micro muted">JPG · PNG · WEBP</span>
+        <span class="micro muted">UP TO 12 MB</span>
       </div>
     </aside>
-
-    <!-- canvas -->
-    <main class="canvas">
-      <header class="topbar">
-        <div class="identity">
-          <div class="avatar" id="avatar">ES</div>
-          <div class="identity-copy">
-            <p class="identity-eyebrow" id="greeting">Good evening, Elara</p>
-            <h1 class="identity-name">Welcome <em>back</em></h1>
-          </div>
-        </div>
-        <div class="topbar-actions">
-          <label class="search-field">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
-              <circle cx="11" cy="11" r="6.4" />
-              <path d="m16 16 4 4" stroke-linecap="round" />
-            </svg>
-            <input id="global-search" type="search" placeholder="Search a plate…" maxlength="16" />
-          </label>
-          <button class="icon-btn" id="refresh-btn" title="Refresh">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-              <path d="M20 12a8 8 0 1 1-2.6-5.9" stroke-linecap="round" />
-              <path d="M20 4v4.5h-4.5" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-          <button class="icon-btn" data-view="scan" title="New scan">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
-              <path d="M12 5v14M5 12h14" stroke-linecap="round" />
-            </svg>
-          </button>
-        </div>
-      </header>
-
-      <!-- ============================== OVERVIEW ============================== -->
-      <section class="view active" id="view-overview">
-        <div class="hero">
-          <div class="hero-media">
-            <img src="/static/img/hero-dusk.jpg" alt="Night ridge in haze" />
-          </div>
-          <div class="hero-top">
-            <span class="hero-badge"><i class="pulse-dot"></i> Live · NH-16 corridor</span>
-            <span id="hero-clock">19:41</span>
-          </div>
-          <div class="hero-body">
-            <h2 class="hero-title">Night<br /><em>Watch</em></h2>
-            <p class="hero-sub" id="hero-sub">Six cameras reporting. Every plate read, scored and archived in under a second.</p>
-            <p class="hero-meta" id="hero-meta">Meridian Traffic Authority · Enterprise</p>
-            <div class="hero-cta">
-              <button class="btn btn-primary" data-view="scan">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
-                  <path d="M8 5.5v13l11-6.5-11-6.5Z" stroke-linejoin="round" />
-                </svg>
-                Start a scan
-              </button>
-              <button class="btn btn-ghost" data-view="library">Review queue</button>
-            </div>
-          </div>
-        </div>
-
-        <nav class="tool-rail" id="tool-rail">
-          <button class="tool active" data-view="overview">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.4">
-              <path d="M12 3v18M3 12h18M6.4 6.4l11.2 11.2M17.6 6.4 6.4 17.6" opacity=".85" />
-            </svg>
-            <span>Live</span>
-          </button>
-          <button class="tool" data-view="scan">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
-              <circle cx="12" cy="12" r="8.2" />
-              <path d="M4 12h16M12 3.8c2.6 2.3 2.6 14.1 0 16.4M12 3.8c-2.6 2.3-2.6 14.1 0 16.4" />
-            </svg>
-            <span>Scan</span>
-          </button>
-          <button class="tool" data-view="library">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
-              <path d="M5 5.5h14M5 12h14M5 18.5h14" stroke-linecap="round" />
-            </svg>
-            <span>Review</span>
-          </button>
-          <button class="tool" data-view="watchlist">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
-              <path d="M12 4.5 4.5 8v3.6c0 4.4 3.1 8 7.5 9.4 4.4-1.4 7.5-5 7.5-9.4V8L12 4.5Z" stroke-linejoin="round" />
-            </svg>
-            <span>Watch</span>
-          </button>
-          <button class="tool" data-view="analytics">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
-              <path d="M4 19V9m5 10V5m5 14v-7m5 7V8" stroke-linecap="round" />
-            </svg>
-            <span>Insights</span>
-          </button>
-        </nav>
-
-        <div class="grid grid-4" id="kpi-row"></div>
-
-        <div class="overview-split" id="overview-row">
-          <div class="card">
-            <div class="card-pad" style="padding-bottom:6px">
-              <div class="card-head">
-                <h3 class="card-title">Recognition volume</h3>
-                <div class="row" style="gap:6px" id="range-chips">
-                  <button class="chip" data-range="24h">24h</button>
-                  <button class="chip active" data-range="7d">7d</button>
-                  <button class="chip" data-range="30d">30d</button>
-                </div>
-              </div>
-              <div class="row" style="gap:18px;margin-bottom:6px">
-                <div>
-                  <div class="result-stat-label">Total scans</div>
-                  <div class="result-stat-value" id="chart-total">—</div>
-                </div>
-                <div>
-                  <div class="result-stat-label">Flagged</div>
-                  <div class="result-stat-value" id="chart-flagged" style="color:var(--danger)">—</div>
-                </div>
-                <div>
-                  <div class="result-stat-label">Mean confidence</div>
-                  <div class="result-stat-value" id="chart-conf" style="color:var(--mint)">—</div>
-                </div>
-              </div>
-              <div class="chart-axis" id="chart-axis"></div>
-              <div class="chart-wrap" id="chart-wrap">
-                <svg class="chart" id="chart" viewBox="0 0 640 150" preserveAspectRatio="none">
-                  <defs>
-                    <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stop-color="#c9b8ff" stop-opacity=".38" />
-                      <stop offset="100%" stop-color="#c9b8ff" stop-opacity="0" />
-                    </linearGradient>
-                  </defs>
-                  <g id="chart-grid"></g>
-                  <path id="chart-area" class="chart-area" d="" />
-                  <path id="chart-line" class="chart-line" d="" />
-                  <g id="chart-dots"></g>
-                </svg>
-              </div>
-            </div>
-          </div>
-
-          <div class="card card-pad">
-            <div class="card-head">
-              <h3 class="card-title">Watchlist</h3>
-              <button class="section-link" data-view="watchlist">View all</button>
-            </div>
-            <div id="watchlist-mini" class="stack" style="gap:8px"></div>
-          </div>
-        </div>
-
-        <div class="section-head">
-          <div>
-            <h3 class="section-title">Recent activity</h3>
-            <p class="section-sub">Every read is timestamped, scored and traceable.</p>
-          </div>
-          <button class="section-link" data-view="library">Open library</button>
-        </div>
-        <div class="card card-pad" id="recent-list"></div>
-
-        <div class="section-head">
-          <div>
-            <h3 class="section-title">Frames worth a look</h3>
-            <p class="section-sub">Highest-risk captures from the last seven days.</p>
-          </div>
-          <button class="section-link" data-view="library">All captures</button>
-        </div>
-        <div class="grid grid-4" id="overview-cards"></div>
-      </section>
-
-      <!-- ================================ SCAN ================================ -->
-      <section class="view" id="view-scan">
-        <div class="section-head" style="margin-top:0">
-          <div>
-            <h3 class="section-title">Recognise a plate</h3>
-            <p class="section-sub">Drop a frame, use a camera sample, or stream via the API.</p>
-          </div>
-          <button class="section-link" id="api-link">API reference</button>
-        </div>
-
-        <div class="scan-layout">
-          <div class="stack">
-            <div class="dropzone" id="dropzone">
-              <input type="file" id="file-input" accept="image/*" />
-              <div>
-                <div class="dropzone-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M12 16V6m0 0L8.5 9.5M12 6l3.5 3.5" stroke-linecap="round" stroke-linejoin="round" />
-                    <path d="M4 15.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2.5" stroke-linecap="round" />
-                  </svg>
-                </div>
-                <h3>Drop a frame</h3>
-                <p>JPEG, PNG or WebP up to 12 MB. Reads plates from dashboards, gantries and handhelds.</p>
-                <button class="btn btn-lilac btn-sm" type="button" id="browse-btn">Choose a file</button>
-              </div>
-            </div>
-
-            <div class="section-head" style="margin:6px 0 2px">
-              <div>
-                <h3 class="section-title" style="font-size:20px">Camera samples</h3>
-                <p class="section-sub">Synthetic night frames from the demo corridor.</p>
-              </div>
-            </div>
-            <div class="grid grid-3" id="sample-grid"></div>
-          </div>
-
-          <div class="result-panel" id="result-panel">
-            <div class="preview-stage" id="preview-stage">
-              <div class="empty" style="border:0">
-                <h4>No frame selected</h4>
-                <p>Your annotated read appears here.</p>
-              </div>
-            </div>
-            <div id="result-detail"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- =============================== LIBRARY ============================== -->
-      <section class="view" id="view-library">
-        <div class="section-head" style="margin-top:0">
-          <div>
-            <h3 class="section-title">Capture library</h3>
-            <p class="section-sub" id="library-sub">All recognition events for this workspace.</p>
-          </div>
-          <div class="row" style="gap:8px">
-            <button class="btn btn-ghost btn-sm" id="export-btn">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                <path d="M12 4v11m0 0 4-4m-4 4-4-4" stroke-linecap="round" stroke-linejoin="round" />
-                <path d="M5 19h14" stroke-linecap="round" />
-              </svg>
-              Export CSV
-            </button>
-            <button class="btn btn-primary btn-sm" data-view="scan">New scan</button>
-          </div>
-        </div>
-
-        <div class="filters" id="library-filters">
-          <button class="chip active" data-status="all">All</button>
-          <button class="chip" data-status="pending">Needs review</button>
-          <button class="chip" data-status="verified">Verified</button>
-          <button class="chip" data-status="flagged">Flagged</button>
-          <button class="chip" data-risk="critical">Critical risk</button>
-          <span class="filters-spacer"></span>
-          <select class="select-plain" id="sort-select">
-            <option value="recent">Newest first</option>
-            <option value="confidence">Most confident</option>
-            <option value="risk">Highest risk</option>
-          </select>
-        </div>
-
-        <div class="grid grid-4" id="library-grid"></div>
-        <div class="pager" id="library-pager"></div>
-      </section>
-
-      <!-- ============================== WATCHLIST ============================= -->
-      <section class="view" id="view-watchlist">
-        <div class="section-head" style="margin-top:0">
-          <div>
-            <h3 class="section-title">Watchlist</h3>
-            <p class="section-sub">Stolen, banned, lapsed-permit and VIP vehicles.</p>
-          </div>
-          <button class="btn btn-primary btn-sm" id="add-watch-btn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <path d="M12 5v14M5 12h14" stroke-linecap="round" />
-            </svg>
-            Add plate
-          </button>
-        </div>
-        <div class="grid grid-4" id="watchlist-grid"></div>
-
-        <div class="grid grid-2" style="margin-top:24px">
-          <div class="card card-pad">
-            <div class="card-head">
-              <h3 class="card-title">Enforcement mix</h3>
-            </div>
-            <div id="watch-mix" class="stack" style="gap:10px"></div>
-          </div>
-          <div class="card card-pad">
-            <div class="card-head">
-              <h3 class="card-title">Recent matches</h3>
-            </div>
-            <div id="watch-matches" class="stack" style="gap:8px"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ============================== ANALYTICS ============================= -->
-      <section class="view" id="view-analytics">
-        <div class="section-head" style="margin-top:0">
-          <div>
-            <h3 class="section-title">Insights</h3>
-            <p class="section-sub">Corridor performance, plate mix and review load.</p>
-          </div>
-        </div>
-        <div class="grid grid-3" id="breakdown-row"></div>
-        <div class="section-head">
-          <div>
-            <h3 class="section-title">Camera fleet</h3>
-            <p class="section-sub" id="fleet-sub">Six cameras across the corridor.</p>
-          </div>
-        </div>
-        <div class="card card-pad" id="camera-list"></div>
-      </section>
-    </main>
-
-    <!-- mobile tab bar -->
-    <nav class="tabbar" id="tabbar">
-      <button class="active" data-view="overview">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-          <path d="M4 11.5 12 4l8 7.5" stroke-linecap="round" stroke-linejoin="round" />
-          <path d="M6.5 10.5V19h11v-8.5" stroke-linecap="round" />
-        </svg>
-        Home
-      </button>
-      <button data-view="scan">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-          <path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" stroke-linecap="round" />
-          <path d="M4 12h16" stroke-linecap="round" opacity=".55" />
-        </svg>
-        Scan
-      </button>
-      <button data-view="library">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-          <rect x="4" y="4" width="7" height="7" rx="1.6" />
-          <rect x="13" y="4" width="7" height="7" rx="1.6" />
-          <rect x="4" y="13" width="7" height="7" rx="1.6" />
-          <rect x="13" y="13" width="7" height="7" rx="1.6" />
-        </svg>
-        Library
-      </button>
-      <button data-view="watchlist">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-          <path d="M12 3.6 5 6.4v5.2c0 4 2.9 7.3 7 8.8 4.1-1.5 7-4.8 7-8.8V6.4L12 3.6Z" stroke-linejoin="round" />
-        </svg>
-        Watch
-      </button>
-    </nav>
   </div>
+</section>
+
+<!-- ================================== APP ================================== -->
+<div class="shell hidden" id="app-shell">
+  <header class="topbar">
+    <div class="brand"><span class="brand-glyph" aria-hidden="true"></span>PLATEVISION</div>
+    <div class="status micro"><span class="dot"></span>LIVE · <span id="corridor-label">MERIDIAN CORRIDOR</span></div>
+    <div class="top-right">
+      <span class="micro muted" id="user-label">—</span>
+      <button class="pill pill-ghost pill-sm" data-action="logout">EXIT</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs" aria-label="Sections">
+    <button class="tab is-active" data-view="overview">OVERVIEW</button>
+    <button class="tab" data-view="scan">SCAN</button>
+    <button class="tab" data-view="library">EVIDENCE</button>
+    <button class="tab" data-view="watchlist">WATCHLIST</button>
+  </nav>
+
+  <main class="view" id="view"></main>
+
+  <footer class="page-foot micro muted">
+    <span>PLATEVISION · <span id="foot-version">1.0.0</span></span>
+    <span id="foot-env">—</span>
+  </footer>
 </div>
 
-<!-- capture drawer -->
-<div class="drawer-scrim" id="drawer-scrim"></div>
-<aside class="drawer" id="drawer" aria-hidden="true">
-  <div class="drawer-head">
-    <span class="card-title" id="drawer-title">Capture</span>
-    <button class="icon-btn ghost" id="drawer-close" aria-label="Close">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-        <path d="M6 6l12 12M18 6 6 18" stroke-linecap="round" />
-      </svg>
-    </button>
-  </div>
-  <div class="drawer-body" id="drawer-body"></div>
-</aside>
+<div id="modal-root"></div>
 
-<!-- add watchlist modal -->
-<div class="modal-scrim" id="modal-scrim">
-  <form class="modal" id="watch-form">
-    <h3>Add to watchlist</h3>
-    <p>Matches trigger a live alert and a signed webhook the moment a plate is read.</p>
-    <div class="field">
-      <label for="wl-plate">Plate</label>
-      <input id="wl-plate" name="plate" placeholder="MH12AB3456" maxlength="16" required />
-    </div>
-    <div class="field-row">
-      <div class="field">
-        <label for="wl-category">Category</label>
-        <select id="wl-category" name="category">
-          <option value="stolen">Stolen</option>
-          <option value="banned">Banned operator</option>
-          <option value="permit">Permit lapsed</option>
-          <option value="unpaid">Toll unpaid</option>
-          <option value="vip">VIP / clearance</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="wl-severity">Severity</label>
-        <select id="wl-severity" name="severity">
-          <option value="critical">Critical</option>
-          <option value="high" selected>High</option>
-          <option value="medium">Medium</option>
-          <option value="low">Low</option>
-        </select>
-      </div>
-    </div>
-    <div class="field">
-      <label for="wl-label">Short label</label>
-      <input id="wl-label" name="label" placeholder="Stolen · Honda City" maxlength="120" />
-    </div>
-    <div class="field">
-      <label for="wl-reason">Reason</label>
-      <textarea id="wl-reason" name="reason" rows="3" maxlength="500" placeholder="FIR 4412/2024 — reported 6 Oct"></textarea>
-    </div>
-    <div class="row" style="gap:10px;margin-top:18px">
-      <button class="btn btn-ghost btn-block" type="button" id="modal-cancel">Cancel</button>
-      <button class="btn btn-primary btn-block" type="submit">Add plate</button>
-    </div>
-  </form>
-</div>
-
-<div class="toasts" id="toasts"></div>
+<input type="file" id="file-picker" accept="image/jpeg,image/png,image/webp,image/bmp" hidden />
 <script src="/static/js/app.js" defer></script>
 </body>
 </html>

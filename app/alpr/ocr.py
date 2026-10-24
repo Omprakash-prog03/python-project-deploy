@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from app.alpr import imaging
+from app.alpr import imaging, learning
 from app.alpr.grammar import ALPHABET
 from app.alpr.types import Box, Glyph
 from app.core.config import PROJECT_ROOT
@@ -39,7 +39,7 @@ FONT_FILES = (
     "Oswald-Bold.ttf",
     "Archivo-Bold.ttf",
 )
-TEMPLATE_VERSION = "v4"
+TEMPLATE_VERSION = "v5"
 
 
 # ------------------------------------------------------------------ features
@@ -139,9 +139,17 @@ def hog_features(bitmap: np.ndarray, cells: tuple[int, int] = (4, 6), bins: int 
         dtype=np.float32,
     ).ravel() / 255.0
     descriptors.extend(coarse.tolist())
-    descriptors.extend(bitmap.sum(axis=0).tolist())
-    descriptors.extend(bitmap.sum(axis=1).tolist())
-    return np.asarray(descriptors, dtype=np.float32)
+    # Projection profiles carry shape information, but only if they are
+    # normalised: raw ink sums swamp the histogram cells and make every
+    # character look alike to the prototype k-NN.
+    columns = bitmap.sum(axis=0, dtype=np.float32)
+    rows = bitmap.sum(axis=1, dtype=np.float32)
+    columns = columns / (float(columns.max()) + 1e-6)
+    rows = rows / (float(rows.max()) + 1e-6)
+    descriptors.extend(columns.tolist())
+    descriptors.extend(rows.tolist())
+    vector = np.asarray(descriptors, dtype=np.float32)
+    return vector / (float(np.linalg.norm(vector)) + 1e-6)
 
 
 def structural_descriptor(bitmap: np.ndarray) -> dict[str, float]:
@@ -264,6 +272,11 @@ class TemplateBank:
         self.bitmaps = bitmaps.astype(np.float32)
         self.features = np.stack([hog_features(b) for b in self.bitmaps]).astype(np.float32)
         self.structures = [structural_descriptor(b) for b in self.bitmaps]
+        # Centre the descriptors once: cosine similarity on uncentred HOG
+        # vectors is dominated by the shared ink mass (0.95+ for every class),
+        # which hides the differences that actually separate characters.
+        self.feature_mean = self.features.mean(axis=0)
+        self.features = self.features - self.feature_mean
         # Centre + L2-normalise bitmaps for fast cosine correlation.
         flat = self.bitmaps.reshape(len(self.bitmaps), -1)
         flat = flat - flat.mean(axis=1, keepdims=True)
@@ -294,17 +307,68 @@ class TemplateBank:
 
 # ------------------------------------------------------------------ classifier
 class GlyphClassifier:
-    def __init__(self, bank: TemplateBank | None = None, temperature: float = 0.055) -> None:
+    def __init__(
+        self,
+        bank: TemplateBank | None = None,
+        temperature: float = 0.055,
+        template_weight: float = 0.58,
+        knn_weight: float = 0.42,
+        structure_weight: float = 1.0,
+        learned_weight: float = 0.65,
+    ) -> None:
         self.bank = bank or TemplateBank()
         self.temperature = temperature
+        self.template_weight = template_weight
+        self.knn_weight = knn_weight
+        self.structure_weight = structure_weight
+        self.learned_weight = learned_weight
         self._proto_matrix: np.ndarray | None = None
+        self._corpus: np.ndarray | None = None
+        self._class_index: dict[str, np.ndarray] | None = None
+        self._learned: np.ndarray | None = None
+        self._learned_labels: list[str] = []
 
     def _ensure(self) -> None:
         self.bank.ensure()
+        if self._corpus is None or self._class_index is None:
+            self._corpus, self._class_index = self._build_corpus()
+            self._learned, self._learned_labels = self._build_learned()
         if self._proto_matrix is None:
             self._proto_matrix = np.stack([self.bank.class_prototypes[c] for c in ALPHABET])
             norms = np.linalg.norm(self._proto_matrix, axis=1, keepdims=True) + 1e-6
             self._proto_matrix = self._proto_matrix / norms
+
+    def _build_learned(self) -> tuple[np.ndarray | None, list[str]]:
+        """Verified exemplars, scored separately so one correction is not diluted."""
+        labels, bitmaps = learning.load()
+        if not labels:
+            return None, []
+        flat = bitmaps.reshape(len(bitmaps), -1).astype(np.float32)
+        flat = flat - flat.mean(axis=1, keepdims=True)
+        return flat / (np.linalg.norm(flat, axis=1, keepdims=True) + 1e-6), list(labels)
+
+    def _build_corpus(self) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+        """Rendered templates plus any glyphs learned from operator corrections."""
+        labels, bitmaps = learning.load()
+        if not labels:
+            return self.bank.corpus, self.bank.class_index
+        flat = bitmaps.reshape(len(bitmaps), -1).astype(np.float32)
+        flat = flat - flat.mean(axis=1, keepdims=True)
+        extra = flat / (np.linalg.norm(flat, axis=1, keepdims=True) + 1e-6)
+        offset = len(self.bank.corpus)
+        index = {char: idx.copy() for char, idx in self.bank.class_index.items()}
+        for position, label in enumerate(labels):
+            index.setdefault(label, np.zeros(0, dtype=np.int64))
+            index[label] = np.append(index[label], offset + position)
+        return np.vstack([self.bank.corpus, extra]), index
+
+    def refresh(self) -> None:
+        """Rebuild the merged corpus after the learned store changes."""
+        self._corpus = None
+        self._class_index = None
+        self._learned = None
+        self._learned_labels = []
+        self._ensure()
 
     def classify(self, bitmap: np.ndarray) -> dict[str, float]:
         self._ensure()
@@ -313,16 +377,25 @@ class GlyphClassifier:
         centered = flat - flat.mean()
         norm = np.linalg.norm(centered) + 1e-6
         query = centered / norm
-        correlation = self.bank.corpus @ query  # [-1, 1]
+        assert self._corpus is not None and self._class_index is not None
+        correlation = self._corpus @ query  # [-1, 1]
         # Template score per class: mean of the top-4 matches.
         template_scores: dict[str, float] = {}
-        for char, idx in self.bank.class_index.items():
+        for char, idx in self._class_index.items():
             if len(idx) == 0:
                 continue
             top = np.sort(correlation[idx])[-4:]
             template_scores[char] = float(top.mean())
 
-        features = hog_features(bitmap)
+        learned_map: dict[str, float] = {}
+        if self._learned is not None:
+            similarities = self._learned @ query
+            grouped: dict[str, list[float]] = {}
+            for label, score in zip(self._learned_labels, similarities, strict=False):
+                grouped.setdefault(label, []).append(float(score))
+            learned_map = {char: max(sorted(v)[-2:]) for char, v in grouped.items()}
+
+        features = hog_features(bitmap) - self.bank.feature_mean
         assert self._proto_matrix is not None
         feature_norm = features / (np.linalg.norm(features) + 1e-6)
         knn_scores = self._proto_matrix @ feature_norm
@@ -334,9 +407,16 @@ class GlyphClassifier:
             if char not in template_scores:
                 continue
             t = template_scores[char]
+            # A verified correction outranks the rendered bank for this site:
+            # same typeface, exposure and lens as the frames it came from.
+            evidence = learned_map.get(char)
+            if evidence is not None and evidence > t:
+                t += self.learned_weight * (evidence - t)
             k = knn_map.get(char, 0.0)
-            logit = 0.58 * t + 0.42 * k
-            logit += self._structural_bonus(char, structure, self.bank.structures)
+            logit = self.template_weight * t + self.knn_weight * k
+            logit += self.structure_weight * self._structural_bonus(
+                char, structure, self.bank.structures
+            )
             logits[char] = logit
         if not logits:
             return {c: 1.0 / len(ALPHABET) for c in ALPHABET}
@@ -420,6 +500,35 @@ def _line_filter(line: list[tuple[int, int, int, int]], target_h: int) -> dict[s
     return {"line": kept, "diagnostics": diagnostics}
 
 
+def _line_skew(line: list[tuple[int, int, int, int]]) -> float:
+    """Estimate the text-line angle in degrees from blob centres.
+
+    Handheld and roadside frames are rarely level; even three degrees of skew
+    smears the components enough to fuse neighbours. The fit is only trusted
+    when the blobs actually sit on a straight line and the tilt is worth
+    correcting.
+    """
+    if len(line) < 5:
+        return 0.0
+    heights = np.array([c[3] for c in line], dtype=np.float64)
+    centres_x = np.array([c[0] + c[2] / 2 for c in line], dtype=np.float64)
+    centres_y = np.array([c[1] + c[3] / 2 for c in line], dtype=np.float64)
+    slope, intercept = np.polyfit(centres_x, centres_y, 1)
+    residual = np.abs(centres_y - (slope * centres_x + intercept))
+    if float(residual.max()) > 0.45 * float(np.median(heights)):
+        return 0.0
+    angle = float(np.degrees(np.arctan(slope)))
+    return angle if abs(angle) >= 2.0 else 0.0
+
+
+def _rotate(gray: np.ndarray, angle: float) -> np.ndarray:
+    image = Image.fromarray(gray.astype(np.uint8))
+    fill = int(np.median(gray))
+    return np.asarray(
+        image.rotate(angle, resample=Image.BICUBIC, expand=False, fillcolor=fill), dtype=gray.dtype
+    )
+
+
 def segment_glyphs(
     plate_gray: np.ndarray,
     *,
@@ -447,6 +556,13 @@ def segment_glyphs(
     diagnostics["mask_score"] = mask_info.get("score")
 
     line, line_info = imaging.text_line_components(ink, target_h)
+    skew = _line_skew(line)
+    if skew:
+        deskewed = _rotate(work, skew)
+        ink, mask_info = imaging.best_ink_mask(deskewed, target_h=target_h)
+        line, line_info = imaging.text_line_components(ink, target_h)
+        diagnostics["skew_deg"] = round(skew, 2)
+        diagnostics["mask_score"] = mask_info.get("score")
     diagnostics["components"] = len(line)
     if len(line) < 3:
         return [], diagnostics
