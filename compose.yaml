@@ -1,0 +1,59 @@
+# Local + single-node production stack.
+#   docker compose up --build
+# Console: http://localhost:8000   Docs: http://localhost:8000/docs
+name: platevision
+
+services:
+  api:
+    build:
+      context: .
+      target: runtime
+    image: platevision/api:${TAG:-local}
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SECRET_KEY: ${SECRET_KEY:-dev-only-change-me-6f1c9a2e8b4d7f0a3c5e9b1d}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://platevision:platevision@db:5432/platevision}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      STORAGE_DIR: /app/storage/uploads
+      MODEL_CACHE_DIR: /app/storage/models
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      ALPR_DEFAULT_COUNTRY: ${ALPR_DEFAULT_COUNTRY:-IN}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      ALLOW_DEMO_LOGIN: ${ALLOW_DEMO_LOGIN:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-240}
+    volumes:
+      - captures:/app/storage/uploads
+      - models:/app/storage/models
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-platevision}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platevision}
+      POSTGRES_DB: ${POSTGRES_DB:-platevision}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-platevision} -d ${POSTGRES_DB:-platevision}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  captures:
+  models:
+  pgdata:

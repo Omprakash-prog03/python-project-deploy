@@ -1,0 +1,34 @@
+# runtime
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+coverage.xml
+htmlcov/
+.coverage
+
+# app data
+storage/
+!storage/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+
+# secrets
+.env
+.env.local
+.env.*.local
+
+# os / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# logs
+*.log

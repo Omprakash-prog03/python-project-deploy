@@ -1,0 +1,32 @@
+# Render blueprint — see https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: platevision
+    runtime: docker
+    plan: starter
+    region: singapore
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: PORT
+        value: "8000"
+      - key: DATABASE_URL
+        value: sqlite:////var/data/platevision.db
+      - key: STORAGE_DIR
+        value: /var/data/uploads
+      - key: MODEL_CACHE_DIR
+        value: /var/data/models
+      - key: SEED_DEMO_DATA
+        value: "true"
+      - key: ALLOW_DEMO_LOGIN
+        value: "true"
+      - key: COOKIE_SECURE
+        value: "true"
+    disk:
+      name: platevision-data
+      mountPath: /var/data
+      sizeGB: 5

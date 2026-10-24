@@ -1,0 +1,43 @@
+# Deploy: fly launch --no-deploy && fly secrets set SECRET_KEY=... && fly deploy
+app = "platevision"
+primary_region = "bom"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ENVIRONMENT = "production"
+  PORT = "8000"
+  STORAGE_DIR = "/data/uploads"
+  MODEL_CACHE_DIR = "/data/models"
+  DATABASE_URL = "sqlite:////data/platevision.db"
+  SEED_DEMO_DATA = "true"
+  ALPR_DEFAULT_COUNTRY = "IN"
+
+[[mounts]]
+  source = "platevision_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 200
+    soft_limit = 120
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "45s"
+  method = "GET"
+  path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "1gb"
