@@ -1,7 +1,9 @@
 """Token-bucket rate limiting.
 
-In-process by default (correct for a single instance). Set ``REDIS_URL`` and
-pass a Redis client to share buckets across replicas.
+In-process and therefore per worker: with N workers or replicas the effective
+limit is N x the configured budget. That is fine for abuse protection on a
+single instance; a shared Redis-backed limiter is required for strict global
+quotas (see docs/DEPLOYMENT.md).
 """
 from __future__ import annotations
 

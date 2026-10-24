@@ -33,7 +33,7 @@ no frames leaving your network.
 | **Multi-tenant & RBAC** | Organisation-scoped data, four roles (`viewer → operator → supervisor → admin`), JWT sessions or scoped API keys. |
 | **Audit trail** | Every login, capture, review, correction, export, key and webhook change is appended to an immutable log with request id and IP. |
 | **Signed webhooks** | `capture.created` and `watchlist.hit` delivered with HMAC-SHA256 signatures and retry/backoff. |
-| **Production ready** | Docker image, compose stack with Postgres, Fly/Render/Railway manifests, health probes, Prometheus metrics, structured logs, rate limiting, CI with an accuracy gate. |
+| **Production ready** | Non-root Docker image, compose stack with Postgres, Kubernetes/Fly/Render/Railway manifests, init Job, health probes, Prometheus metrics, JSON logs, fail-fast config validation, CI with an accuracy gate. |
 
 ---
 
@@ -61,21 +61,30 @@ so the dashboard shows genuine detections, confidences and timings.
 ### Docker (one command)
 
 ```bash
+cp .env.example .env        # set SECRET_KEY and POSTGRES_PASSWORD
 docker compose up --build
 # → http://localhost:8000  (app + Postgres + persistent volumes)
 ```
+
+The container validates its configuration, prepares the schema once (`scripts/init_db.py`),
+then starts the workers. In production it refuses to boot on a weak `SECRET_KEY`, on
+`DEBUG=true`, or on an unreachable S3 bucket instead of quietly falling back to local disk.
 
 ### Deploy to a cloud
 
 | Target | Command |
 |---|---|
+| Kubernetes | `kubectl apply -f k8s/platevision.yaml` (secret + init Job included) |
 | Fly.io | `fly launch --no-deploy && fly secrets set SECRET_KEY=$(openssl rand -hex 32) && fly deploy` |
 | Render | New Blueprint → point at this repo (`render.yaml`) |
 | Railway | New project → Deploy from repo (`railway.json`, Dockerfile build) |
 | Any VM | `docker build -t platevision . && docker run -p 8000:8000 --env-file .env platevision` |
-| Bare metal | `pip install -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers` |
+| Bare metal | `python scripts/init_db.py && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers` |
 
-See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for hardening, storage options and scaling.
+Postgres is supported out of the box (`psycopg[binary]` is a pinned dependency, driver URL scheme
+`postgresql+psycopg://`); object storage is an optional extra (`requirements-s3.txt`, or build
+with `--build-arg INSTALL_S3=1`). See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the full
+matrix of deployment targets, hardening, backups, scaling and the production checklist.
 
 ---
 
@@ -250,8 +259,15 @@ All settings are environment variables (see `.env.example`); the ones that matte
 | `MAX_UPLOAD_MB` | `12` | Hard limit enforced before inference |
 | `RATE_LIMIT_PER_MINUTE` / `_BURST` | `240` / `60` | Token bucket per key/IP |
 | `CORS_ORIGINS` | `*` | Restrict to your console origin in production |
+| `ALLOWED_HOSTS` | `*` | Comma-separated hosts accepted by `TrustedHostMiddleware` |
+| `COOKIE_SECURE` | auto in production | Session cookies require HTTPS unless explicitly disabled |
+| `BOOTSTRAP_ON_START` | `true` | Set `false` in containers — the entrypoint/init Job prepares the schema |
 | `SEED_DEMO_DATA` | `true` | Set `false` for a clean tenant |
 | `ALLOW_DEMO_LOGIN` | `true` | Disable the demo shortcut in production |
+
+`GET /api/v1/config` returns the public, secret-free subset (name, version, environment, demo
+login availability, countries, upload limit) so the console can render itself correctly without
+baked-in credentials.
 
 ---
 
@@ -260,7 +276,7 @@ All settings are environment variables (see `.env.example`); the ones that matte
 ```bash
 make install     # runtime + dev dependencies
 make dev         # autoreload server
-make test        # 49 tests: engine, grammar, API, security, metrics
+make test        # 70 tests: engine, grammar, API, security, metrics, deployment
 make lint        # ruff
 make eval        # accuracy harness
 
@@ -279,7 +295,7 @@ app/
 ├── assets/fonts/  # glyph bank sources
 ├── main.py        # application factory, middleware, error envelope
 └── seed.py        # idempotent demo provisioning
-tests/ | scripts/ | docker/ | docs/
+tests/ | scripts/ | docker/ | k8s/ | docs/
 ```
 
 More: [Architecture](docs/ARCHITECTURE.md) · [Deployment](docs/DEPLOYMENT.md) ·
@@ -297,6 +313,8 @@ More: [Architecture](docs/ARCHITECTURE.md) · [Deployment](docs/DEPLOYMENT.md) �
   HSTS in production). Mutable operations are rate-limited and written to the audit log.
 * Evidence retention is your policy: `DELETE /captures/{id}` removes the row and both the
   original and thumbnail objects (supervisor+ only, audited).
+* Production configuration is validated at startup: weak secrets, `DEBUG`, an unreachable
+  evidence bucket and wildcard-with-credentials CORS are rejected, not warned about.
 * Data residency: all inference is local, so frames never leave your network.
 
 ## Licence

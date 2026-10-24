@@ -28,8 +28,10 @@ services:
         value: "true"
       - key: BOOTSTRAP_ON_START
         value: "false"
+      # SQLite permits one writer; scale with a managed Postgres before raising
+      # this (the container forces 1 worker for SQLite regardless).
       - key: WEB_CONCURRENCY
-        value: "2"
+        value: "1"
     disk:
       name: platevision-data
       mountPath: /var/data

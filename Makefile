@@ -1,4 +1,4 @@
-.PHONY: help install dev run test lint eval docker compose seed clean
+.PHONY: help install dev run test lint eval docker compose seed init-db smoke postgres clean
 
 help:
 	@echo "PlateVision targets:"
@@ -11,6 +11,8 @@ help:
 	@echo "  make eval-deg  ALPR accuracy harness (degraded frames)"
 	@echo "  make docker    build the production image"
 	@echo "  make compose   run the full stack with docker compose"
+	@echo "  make init-db   prepare the schema (run before workers, safe to repeat)"
+	@echo "  make smoke     end-to-end smoke test against a running instance"
 	@echo "  make seed      provision the demo workspace"
 	@echo "  make clean     remove caches and local storage"
 
@@ -40,6 +42,12 @@ docker:
 
 compose:
 	docker compose up --build
+
+init-db:
+	python scripts/init_db.py
+
+smoke:
+	python scripts/smoke.py --base $${BASE:-http://localhost:8000}
 
 seed:
 	python -m app.seed

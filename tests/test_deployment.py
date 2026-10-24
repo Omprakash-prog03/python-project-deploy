@@ -44,6 +44,51 @@ def test_kubernetes_manifests_parse():
     assert container["livenessProbe"]["httpGet"]["path"] == "/healthz"
 
 
+def _k8s_docs():
+    docs = [d for d in yaml.safe_load_all((ROOT / "k8s/platevision.yaml").read_text()) if d]
+    return docs, {d["kind"]: d for d in docs if d["kind"] != "ServiceAccount"}
+
+
+def test_kubernetes_config_has_no_unexpanded_placeholders():
+    """`kubectl` does not expand $(VAR) inside a ConfigMap — that must never ship."""
+    _, by_kind = _k8s_docs()
+    config = by_kind["ConfigMap"]["data"]
+    assert not [k for k, v in config.items() if "$(" in str(v)]
+    assert "SECRET_KEY" not in config and "DATABASE_URL" not in config
+    if config.get("STORAGE_BACKEND") == "s3":
+        assert config.get("S3_BUCKET"), "S3 backend requires an explicit bucket"
+
+
+def test_kubernetes_workloads_consume_the_secret():
+    _, by_kind = _k8s_docs()
+    for kind in ("Deployment", "Job"):
+        pod = by_kind[kind]["spec"]["template"]["spec"]
+        sources = {sorted(ref)[0] for ref in pod["containers"][0]["envFrom"]}
+        assert "configMapRef" in sources and "secretRef" in sources, kind
+
+
+def test_kubernetes_ingress_hosts_are_allowlisted():
+    _, by_kind = _k8s_docs()
+    hosts = set()
+    for rule in by_kind["Ingress"]["spec"]["rules"]:
+        hosts.add(rule["host"])
+    allowed = set(_k8s_docs()[1]["ConfigMap"]["data"]["ALLOWED_HOSTS"].split(","))
+    assert hosts <= allowed, f"{hosts - allowed} would be rejected by TrustedHostMiddleware"
+
+
+def test_sqlite_targets_never_ask_for_more_than_one_worker():
+    import tomllib
+
+    fly_env = tomllib.loads((ROOT / "fly.toml").read_text())["env"]
+    render_env = {
+        item["key"]: item.get("value")
+        for item in yaml.safe_load((ROOT / "render.yaml").read_text())["services"][0]["envVars"]
+    }
+    for name, env in (("fly.toml", fly_env), ("render.yaml", render_env)):
+        if str(env.get("DATABASE_URL", "")).startswith("sqlite"):
+            assert str(env.get("WEB_CONCURRENCY", "1")) == "1", name
+
+
 def test_dockerfile_contract():
     dockerfile = (ROOT / "Dockerfile").read_text()
     assert "USER platevision" in dockerfile

@@ -24,15 +24,16 @@ fi
 mkdir -p "${STORAGE_DIR:-/app/storage/uploads}" "${MODEL_CACHE_DIR:-/app/storage/models}"
 
 # SQLite allows exactly one writer; multiple uvicorn workers contend on the WAL
-# and can surface "database is locked" under load. Serialise to one worker and
-# let the operator scale with replicas instead.
+# and surface "database is locked" under load. Force a single worker and let the
+# operator scale with replicas (or move to Postgres) instead of failing in prod.
 case "${DATABASE_URL:-sqlite}" in
   sqlite*|"")
-    if [ -z "${WEB_CONCURRENCY}" ]; then
-      WEB_CONCURRENCY=1
-      export WEB_CONCURRENCY
-      log "SQLite backend detected — defaulting to 1 worker (scale with replicas)."
-    fi
+    case "${WEB_CONCURRENCY:-}" in
+      ""|1) ;;
+      *) log "SQLite backend detected — overriding WEB_CONCURRENCY=${WEB_CONCURRENCY} with 1." ;;
+    esac
+    WEB_CONCURRENCY=1
+    export WEB_CONCURRENCY
     ;;
 esac
 
