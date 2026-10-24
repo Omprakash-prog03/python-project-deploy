@@ -19,6 +19,7 @@ from app.core.logging import get_logger
 from app.models.entities import Capture, WatchlistEntry
 from app.schemas.models import CaptureListOut, CaptureOut, CaptureUpdate, TeachIn, TeachOut
 from app.services import audit, recognition
+from app.services import pdf as pdf_reports
 from app.services.serializers import capture_out
 from app.services.storage import storage
 
@@ -211,6 +212,77 @@ def export_captures(
     )
 
 
+def _report_entry(capture: Capture, *, with_image: bool = True) -> pdf_reports.ReportEntry:
+    """Flatten a capture into the fields a printed record needs."""
+    payload = capture_out(capture)
+    image: bytes | None = None
+    if with_image and capture.image_path:
+        try:
+            image = storage.read(capture.image_path)
+        except Exception:  # pragma: no cover - archived or missing evidence
+            logger.warning("Evidence frame unreadable for report %s", capture.id, exc_info=True)
+    return pdf_reports.ReportEntry(
+        plate=capture.plate or "",
+        display=payload["plate_display"] or capture.plate or "",
+        captured_at=capture.created_at,
+        confidence=capture.confidence,
+        status=capture.status,
+        source=capture.source,
+        camera=capture.camera.name if capture.camera else None,
+        region=payload["region_name"] or capture.region,
+        plate_type=capture.plate_type,
+        engine=capture.engine_version,
+        capture_id=capture.id,
+        risk_level=capture.risk_level,
+        notes=capture.notes,
+        image=image,
+    )
+
+
+@router.get("/export.pdf")
+def export_captures_pdf(
+    db: DbSession,
+    user: CurrentUser,
+    org: Org,
+    date_from: Annotated[datetime | None, Query()] = None,
+    date_to: Annotated[datetime | None, Query()] = None,
+    limit: int = Query(500, ge=1, le=2000, description="Maximum scans to include"),
+) -> StreamingResponse:
+    """Every stored scan as a printable contact sheet."""
+    stmt = (
+        select(Capture)
+        .options(selectinload(Capture.camera))
+        .where(Capture.org_id == org.id)
+        .order_by(Capture.created_at.desc())
+        .limit(limit)
+    )
+    if date_from:
+        stmt = stmt.where(Capture.created_at >= date_from)
+    if date_to:
+        stmt = stmt.where(Capture.created_at <= date_to)
+    rows = db.scalars(stmt).all()
+    entries = [_report_entry(row) for row in rows]
+    payload = pdf_reports.history_report(entries, subtitle=org.name)
+    audit.record(
+        db,
+        org_id=org.id,
+        actor=user.email,
+        action="captures.exported",
+        detail={"format": "pdf", "count": len(entries)},
+        ip="api",
+    )
+    return StreamingResponse(
+        iter([payload]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="platevision-scans-'
+                f'{datetime.now(UTC):%Y%m%d-%H%M}.pdf"'
+            )
+        },
+    )
+
+
 @router.get("/{capture_id}", response_model=CaptureOut)
 def get_capture(capture_id: str, db: DbSession, user: CurrentUser, org: Org) -> CaptureOut:
     capture = db.scalars(
@@ -222,6 +294,40 @@ def get_capture(capture_id: str, db: DbSession, user: CurrentUser, org: Org) -> 
         raise NotFound("Capture not found.", code="capture_not_found")
     watchlist = _watchlist_lookup(db, org.id, {capture.plate} if capture.plate else set())
     return CaptureOut(**capture_out(capture, watchlist=watchlist.get(capture.plate or "")))
+
+
+@router.get("/{capture_id}/report.pdf")
+def capture_report_pdf(capture_id: str, db: DbSession, user: CurrentUser, org: Org) -> StreamingResponse:
+    """One scan as an evidence sheet."""
+    capture = db.scalars(
+        select(Capture)
+        .options(selectinload(Capture.camera))
+        .where(Capture.id == capture_id, Capture.org_id == org.id)
+    ).first()
+    if capture is None:
+        raise NotFound("Capture not found.", code="capture_not_found")
+    payload = pdf_reports.single_report(_report_entry(capture))
+    audit.record(
+        db,
+        org_id=org.id,
+        actor=user.email,
+        action="capture.report_downloaded",
+        entity_type="capture",
+        entity_id=capture.id,
+        detail={"format": "pdf"},
+        ip="api",
+    )
+    stamp = capture.plate or "unread"
+    return StreamingResponse(
+        iter([payload]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="platevision-{stamp}-'
+                f'{capture.created_at:%Y%m%d-%H%M}.pdf"'
+            )
+        },
+    )
 
 
 @router.get("/{capture_id}/image")
