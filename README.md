@@ -263,6 +263,8 @@ make dev         # autoreload server
 make test        # 49 tests: engine, grammar, API, security, metrics
 make lint        # ruff
 make eval        # accuracy harness
+
+python scripts/smoke.py --base http://localhost:8000   # 14-step live check
 ```
 
 ```

@@ -381,11 +381,13 @@
       if (chip.dataset.status) {
         $$('#library-filters .chip[data-status]').forEach((c) => c.classList.remove('active'));
         state.library.status = chip.dataset.status;
+        chip.classList.add('active');
       } else {
+        const next = state.library.risk === chip.dataset.risk ? null : chip.dataset.risk;
         $$('#library-filters .chip[data-risk]').forEach((c) => c.classList.remove('active'));
-        state.library.risk = state.library.risk === chip.dataset.risk ? null : chip.dataset.risk;
+        state.library.risk = next;
+        if (next) chip.classList.add('active');
       }
-      chip.classList.add('active');
       state.library.page = 1;
       loadLibrary();
     });
