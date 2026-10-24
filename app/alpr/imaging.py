@@ -257,7 +257,9 @@ def text_line_components(
             c for c in comps
             if 0.68 <= c[3] / ref_h <= 1.45
             and abs((c[1] + c[3] / 2) - ref_cy) <= ref_h * 0.55
-            and c[2] / max(1, c[3]) <= 1.35
+            # Wide letters (W, M) are legitimate glyphs at ~1.5 aspect;
+            # fused pairs run well past 1.9, so the cap stays conservative.
+            and c[2] / max(1, c[3]) <= 1.95
         ]
         if len(cluster) < 3:
             continue

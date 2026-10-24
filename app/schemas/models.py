@@ -135,6 +135,26 @@ class CaptureUpdate(BaseModel):
         return v.strip().upper() if v else v
 
 
+class TeachIn(BaseModel):
+    """A corrected reading that also trains the glyph classifier."""
+
+    plate: str = Field(min_length=3, max_length=16)
+
+    @field_validator("plate")
+    @classmethod
+    def _normalise(cls, v: str) -> str:
+        cleaned = "".join(ch for ch in v.upper() if ch.isalnum())
+        if len(cleaned) < 3:
+            raise ValueError("plate must contain at least 3 alphanumeric characters")
+        return cleaned
+
+
+class TeachOut(BaseModel):
+    capture: CaptureOut
+    learned: dict[str, int]
+    stats: dict[str, Any]
+
+
 # ------------------------------------------------------------------ watchlist
 class WatchlistCreate(BaseModel):
     plate: str = Field(min_length=3, max_length=16)

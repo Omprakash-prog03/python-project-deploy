@@ -11,14 +11,18 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
+from app.alpr import learning
+from app.alpr.engine import EngineOptions, get_engine
 from app.api.deps import CurrentUser, DbSession, Org, client_ip, enforce_rate_limit
 from app.core.errors import Forbidden, NotFound, ValidationFailed
+from app.core.logging import get_logger
 from app.models.entities import Capture, WatchlistEntry
-from app.schemas.models import CaptureListOut, CaptureOut, CaptureUpdate
+from app.schemas.models import CaptureListOut, CaptureOut, CaptureUpdate, TeachIn, TeachOut
 from app.services import audit, recognition
 from app.services.serializers import capture_out
 from app.services.storage import storage
 
+logger = get_logger(__name__)
 router = APIRouter(prefix="/captures", tags=["captures"], dependencies=[Depends(enforce_rate_limit)])
 
 
@@ -276,7 +280,8 @@ def update_capture(
         if user.role == "viewer":
             raise Forbidden("Viewers cannot correct plates.", code="insufficient_role")
         capture.plate = payload.plate
-        capture.plate_display = payload.plate
+        # Let the serializer apply jurisdiction formatting.
+        capture.plate_display = None
         changes["plate"] = payload.plate
     db.add(capture)
     db.commit()
@@ -293,6 +298,70 @@ def update_capture(
     )
     watchlist = _watchlist_lookup(db, org.id, {capture.plate} if capture.plate else set())
     return CaptureOut(**capture_out(capture, watchlist=watchlist.get(capture.plate or "")))
+
+
+@router.post("/{capture_id}/teach", response_model=TeachOut)
+def teach_capture(
+    capture_id: str,
+    payload: TeachIn,
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    org: Org,
+) -> TeachOut:
+    """Correct a reading and teach the classifier the glyphs it got wrong.
+
+    The stored frame is read again, the glyphs are aligned against the
+    corrected spelling, and every substituted character becomes a learned
+    exemplar for that class. Corrections therefore improve the next read from
+    the same camera instead of only fixing one row.
+    """
+    capture = db.scalars(
+        select(Capture)
+        .options(selectinload(Capture.camera), selectinload(Capture.user))
+        .where(Capture.id == capture_id, Capture.org_id == org.id)
+    ).first()
+    if capture is None:
+        raise NotFound("Capture not found.", code="capture_not_found")
+    if user.role == "viewer":
+        raise Forbidden("Viewers cannot correct plates.", code="insufficient_role")
+
+    learned = {"added": 0, "total": 0, "classes": 0}
+    if capture.image_path:
+        try:
+            frame = storage.read(capture.image_path)
+            result = get_engine().recognize(
+                frame, EngineOptions(country=capture.country or "IN")
+            )
+            best = result.best
+            if best is not None:
+                pairs = learning.align_pairs(best.plate, payload.plate, best.glyphs)
+                if pairs:
+                    learned = learning.add(pairs)
+        except Exception:  # pragma: no cover - a bad stored frame must not block the fix
+            logger.warning("Glyph learning failed; correction still applied", exc_info=True)
+
+    capture.plate = payload.plate
+    capture.plate_display = None
+    db.add(capture)
+    db.commit()
+    db.refresh(capture)
+    audit.record(
+        db,
+        org_id=org.id,
+        actor=user.email,
+        action="capture.corrected",
+        entity_type="capture",
+        entity_id=capture.id,
+        detail={"plate": payload.plate, "exemplars_added": learned.get("added", 0)},
+        ip=client_ip(request),
+    )
+    watchlist = _watchlist_lookup(db, org.id, {capture.plate})
+    return TeachOut(
+        capture=CaptureOut(**capture_out(capture, watchlist=watchlist.get(capture.plate or ""))),
+        learned=learned,
+        stats=learning.stats(),
+    )
 
 
 @router.post("/{capture_id}/reanalyze", response_model=CaptureOut)

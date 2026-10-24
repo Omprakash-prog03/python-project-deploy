@@ -360,6 +360,18 @@ volume).
 | 5–40 cameras | 2–4 workers, Postgres, S3/R2 evidence |
 | 40+ cameras | 2–8 replicas behind a load balancer, Postgres, S3, Redis/infra rate limiting, move inference to a queue worker |
 
+### Learned glyphs
+
+Operator corrections are stored in `MODEL_CACHE_DIR/learned-glyphs-v1.npz` (bounded at 60
+exemplars per class, atomic writes). Two consequences for deployment:
+
+* On a **free tier with ephemeral disk**, learning lasts for the life of the instance and is
+  lost on redeploy — acceptable for a demo, but pin `MODEL_CACHE_DIR` to a volume/PVC if
+  corrections should survive.
+* In a **multi-replica** deployment each replica learns independently from the corrections it
+  serves. Share the file via the volume, or accept the drift; `GET /api/v1/learning` reports
+  what a given replica knows and `DELETE /api/v1/learning` resets it.
+
 ---
 
 ## 14. Backups and restore
@@ -369,6 +381,8 @@ volume).
 * **Evidence** — versioned bucket or `rsync` of `STORAGE_DIR`. Keys are date-partitioned, so
   lifecycle rules can implement retention without touching the database.
 * **Glyph cache** — disposable; rebuilds on boot.
+* **Learned glyphs** — small and rebuildable by re-correcting frames, but back it up if your
+  operators invested in a site-specific model.
 * **Restore drill** — restore the dump into a scratch database, point a container at it with the
   same bucket, run `python scripts/smoke.py --base http://localhost:8000`; all 14 checks must pass
   before you call the backup good.

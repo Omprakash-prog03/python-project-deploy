@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import func, select, text
 
+from app.alpr import learning
 from app.alpr.engine import get_engine
 from app.api.deps import AdminUser, CurrentUser, DbSession, Org, SupervisorUser, enforce_rate_limit
 from app.core.config import settings
@@ -225,6 +226,19 @@ def delete_webhook(webhook_id: str, db: DbSession, user: AdminUser, org: Org) ->
             db, org_id=org.id, actor=user.email, action="webhook.deleted",
             entity_type="webhook", entity_id=webhook_id,
         )
+    return Response(status_code=204)
+
+
+@router.get("/learning")
+def learning_stats(user: CurrentUser) -> dict:
+    """What the reader has learned from operator corrections."""
+    return learning.stats()
+
+
+@router.delete("/learning", status_code=204)
+def learning_reset(user: AdminUser) -> Response:
+    """Forget every learned exemplar and fall back to the rendered bank."""
+    learning.reset()
     return Response(status_code=204)
 
 
