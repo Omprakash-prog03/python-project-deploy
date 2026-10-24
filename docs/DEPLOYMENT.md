@@ -178,13 +178,16 @@ cannot take concurrent writers. Raise `WEB_CONCURRENCY` only after moving to Pos
 
 ## 7. Render / Railway
 
-* **Render** — create a Blueprint from the repo; `render.yaml` provisions the Docker service,
-  a 5 GB disk at `/var/data`, a generated `SECRET_KEY`, `COOKIE_SECURE=true`, and one worker
-  (SQLite). Add `DATABASE_URL` to move to Postgres and raise `WEB_CONCURRENCY`.
+* **Render** — click the *Deploy to Render* button in the README (or create a Blueprint); the
+  blueprint provisions the Docker service, a 5 GB disk at `/var/data`, a generated `SECRET_KEY`,
+  `COOKIE_SECURE=true`, and one worker (SQLite). Add `DATABASE_URL` to move to Postgres and raise
+  `WEB_CONCURRENCY`. The image entrypoint still runs, so the schema is prepared before the worker.
 * **Railway** — `railway.json` selects the Dockerfile builder, `/healthz` health check and
-  restart policy. Mount a volume at `/data` and set `DATABASE_URL`, `STORAGE_DIR`,
-  `MODEL_CACHE_DIR`, `SECRET_KEY`, `SEED_DEMO_DATA=false`. The start command defaults to one
-  worker; override `WEB_CONCURRENCY` after attaching Postgres.
+  restart policy, and deliberately inherits the image CMD so the entrypoint runs (config
+  validation, schema init, SQLite worker clamp). Mount a volume at `/data` and set
+  `DATABASE_URL`, `STORAGE_DIR`, `MODEL_CACHE_DIR`, `SECRET_KEY`, `SEED_DEMO_DATA=false`.
+  Without `DATABASE_URL` it falls back to SQLite with one worker; set `WEB_CONCURRENCY` after
+  attaching Postgres.
 
 ## 8. Bare metal (systemd + nginx)
 
