@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import func, select
 
 from app.alpr import grammar
@@ -99,7 +99,7 @@ def toggle_entry(entry_id: str, db: DbSession, user: SupervisorUser, org: Org) -
 
 
 @router.delete("/{entry_id}", status_code=204)
-def delete_entry(entry_id: str, db: DbSession, user: SupervisorUser, org: Org) -> None:
+def delete_entry(entry_id: str, db: DbSession, user: SupervisorUser, org: Org) -> Response:
     entry = db.scalars(
         select(WatchlistEntry).where(WatchlistEntry.id == entry_id, WatchlistEntry.org_id == org.id)
     ).first()
@@ -111,6 +111,7 @@ def delete_entry(entry_id: str, db: DbSession, user: SupervisorUser, org: Org) -
         db, org_id=org.id, actor=user.email, action="watchlist.removed",
         entity_type="watchlist", entity_id=entry_id,
     )
+    return Response(status_code=204)
 
 
 @router.get("/matches", response_model=list[dict])

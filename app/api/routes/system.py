@@ -166,7 +166,7 @@ def create_api_key(
 
 
 @router.delete("/api-keys/{key_id}", status_code=204)
-def revoke_api_key(key_id: str, db: DbSession, user: AdminUser, org: Org) -> None:
+def revoke_api_key(key_id: str, db: DbSession, user: AdminUser, org: Org) -> Response:
     key = db.scalars(
         select(ApiKey).where(ApiKey.id == key_id, ApiKey.org_id == org.id)
     ).first()
@@ -178,6 +178,7 @@ def revoke_api_key(key_id: str, db: DbSession, user: AdminUser, org: Org) -> Non
         db, org_id=org.id, actor=user.email, action="apikey.revoked",
         entity_type="api_key", entity_id=key_id,
     )
+    return Response(status_code=204)
 
 
 @router.get("/webhooks", response_model=list[WebhookOut])
@@ -211,7 +212,7 @@ def create_webhook(
 
 
 @router.delete("/webhooks/{webhook_id}", status_code=204)
-def delete_webhook(webhook_id: str, db: DbSession, user: AdminUser, org: Org) -> None:
+def delete_webhook(webhook_id: str, db: DbSession, user: AdminUser, org: Org) -> Response:
     endpoint = db.scalars(
         select(WebhookEndpoint).where(
             WebhookEndpoint.id == webhook_id, WebhookEndpoint.org_id == org.id
@@ -220,6 +221,11 @@ def delete_webhook(webhook_id: str, db: DbSession, user: AdminUser, org: Org) ->
     if endpoint:
         db.delete(endpoint)
         db.commit()
+        audit.record(
+            db, org_id=org.id, actor=user.email, action="webhook.deleted",
+            entity_type="webhook", entity_id=webhook_id,
+        )
+    return Response(status_code=204)
 
 
 @router.get("/team", response_model=list[dict])
