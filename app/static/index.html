@@ -2,133 +2,94 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
-<meta name="theme-color" content="#0a0a0a" />
-<title>PlateVision · Plate Scan</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>PlateVision</title>
 <meta name="description" content="Live licence-plate scanning. Point, shoot, read, export." />
 <link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml" />
-<link rel="preload" href="/static/fonts/Inter-Variable.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="/static/css/app.css" />
 </head>
 <body>
 
-<div class="toasts" id="toasts" aria-live="polite"></div>
+<!-- ══════════════════════════════════════════════════════════ CAMERA ══ -->
+<main class="camera" id="camera">
 
-<div class="device" id="device">
+  <header class="cam-bar">
+    <button class="glass-btn" data-action="toggle-torch" id="torch-btn" aria-label="Torch" aria-pressed="false">
+      <svg viewBox="0 0 24 24"><path d="M13 2 4.6 13.4H11l-1.2 8.6L18.6 10.6H12l1-8.6Z"/></svg>
+    </button>
 
-  <!-- ================================ CAMERA ================================ -->
-  <header class="cam-head">
-    <div class="cam-title">
-      <span class="micro muted">CAMERA</span>
-      <span class="cam-mode">PLATE<br />SCAN</span>
+    <div class="cam-status" id="cam-status">
+      <span class="status-dot"></span>
+      <span class="status-text" id="status-text">STANDBY</span>
     </div>
 
-    <div class="chips" role="toolbar" aria-label="Camera controls">
-      <button class="chip chip-icon" data-action="toggle-torch" id="torch-btn" aria-label="Torch" aria-pressed="false">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4.5 13.2H11l-1.4 8.8L19 10.4h-6.6L13 2Z" /></svg>
-      </button>
-      <button class="chip" data-action="cycle-country" id="country-btn" title="Jurisdiction">IN</button>
-      <button class="chip chip-wide is-active" data-action="toggle-auto" id="auto-btn" aria-pressed="true">
-        <span class="chip-label">LIVE</span>
-        <span class="chip-sub" id="auto-sub">AUTO SCAN</span>
-      </button>
-      <button class="chip chip-icon" data-action="open-library" aria-label="Scan history">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h11" /></svg>
-      </button>
-      <button class="chip chip-icon" data-action="open-menu" aria-label="More">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="18" cy="12" r="1.4" /></svg>
-      </button>
-    </div>
+    <button class="glass-btn" data-action="open-settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M21.2 12h-2.4M5.2 12H2.8M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7M18.5 18.5l-1.7-1.7M7.2 7.2 5.5 5.5"/></svg>
+    </button>
   </header>
 
-  <main class="stage">
-    <!-- viewfinder -->
-    <section class="finder" id="finder" aria-label="Camera viewfinder">
-      <video id="cam" playsinline muted autoplay></video>
-      <img class="finder-still" id="finder-still" src="/static/img/hero-plate.jpg" alt="" />
-      <canvas id="capture-canvas" hidden></canvas>
+  <section class="viewfinder" id="viewfinder" aria-label="Camera viewfinder">
+    <video id="cam" playsinline muted autoplay></video>
+    <img class="still" id="still" src="/static/img/hero-plate.jpg" alt="" />
+    <canvas id="snapshot" hidden></canvas>
 
-      <div class="marks" aria-hidden="true">
-        <span></span><span></span><span></span><span></span>
-      </div>
+    <div class="brackets" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
 
-      <div class="finder-top">
-        <span class="live-dot" id="live-dot"></span>
-        <span class="micro" id="finder-state">STANDBY</span>
-        <span class="micro muted" id="finder-fps">—</span>
-      </div>
+    <div class="vf-hint" id="vf-hint">
+      <span>Align the plate in frame</span>
+    </div>
 
-      <div class="finder-hint" id="finder-hint">
-        <span class="micro">ALIGN THE PLATE INSIDE THE FRAME</span>
-      </div>
+    <div class="vf-readout" id="vf-readout" hidden>
+      <span class="readout-plate" id="readout-plate">—</span>
+      <span class="readout-conf" id="readout-conf">—</span>
+    </div>
 
-      <div class="finder-plate" id="finder-plate" hidden>
-        <span class="plate-read" id="plate-read">—</span>
-        <span class="micro muted" id="plate-conf">—</span>
-      </div>
+    <div class="vf-progress" id="vf-progress" hidden><span></span></div>
+  </section>
 
-      <!-- recent scans rail, sits on the glass like the reference's EV strip -->
-      <div class="strip" id="strip" aria-label="Recent scans"></div>
-    </section>
+  <section class="cam-controls">
+    <div class="jurisdiction-row" id="jurisdiction-row" role="group" aria-label="Jurisdiction">
+      <button class="zoom-pill" data-country="IN">IN</button>
+      <button class="zoom-pill" data-country="US">US</button>
+      <button class="zoom-pill" data-country="UK">UK</button>
+      <button class="zoom-pill" data-country="EU">EU</button>
+      <button class="zoom-pill" data-country="GENERIC">ANY</button>
+    </div>
 
-    <!-- controls under the glass -->
-    <section class="tray">
-      <div class="tray-row tray-nav">
-        <button class="tray-arrow" data-action="country-prev" aria-label="Previous jurisdiction">‹</button>
-        <div class="tray-block">
-          <span class="micro muted">JURISDICTION</span>
-          <strong id="tray-country">INDIA</strong>
-        </div>
-        <div class="tray-scale" id="country-scale" role="group" aria-label="Jurisdiction">
-          <button class="scale-item" data-country="IN">IN</button>
-          <button class="scale-item" data-country="US">US</button>
-          <button class="scale-item" data-country="UK">UK</button>
-          <button class="scale-item" data-country="EU">EU</button>
-          <button class="scale-item" data-country="GENERIC">ANY</button>
-        </div>
-        <div class="tray-block is-end">
-          <span class="micro muted">ENGINE</span>
-          <strong id="tray-engine">LOCAL</strong>
-        </div>
-        <button class="tray-arrow" data-action="country-next" aria-label="Next jurisdiction">›</button>
-      </div>
+    <div class="mode-row" id="mode-row" role="tablist" aria-label="Capture mode">
+      <button class="mode" data-mode="photo" role="tab">PHOTO</button>
+      <button class="mode is-active" data-mode="scan" role="tab" aria-selected="true">SCAN</button>
+      <button class="mode" data-mode="import" role="tab">IMPORT</button>
+    </div>
 
-      <div class="tray-row tray-meta">
-        <button class="meta-item" data-action="choose-mode" id="meta-mode"><b>A</b><span class="micro">AUTO</span></button>
-        <button class="meta-item" data-action="pick-file"><b id="meta-res">—</b><span class="micro">FRAME</span></button>
-        <button class="meta-item" data-action="pick-file"><b>1/∞</b><span class="micro">STILL</span></button>
-        <button class="meta-item" data-action="toggle-torch"><b id="meta-flash">0.0</b><span class="micro">FILL</span></button>
-        <button class="meta-item meta-icon" data-action="open-settings" aria-label="Settings">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></svg>
-        </button>
-      </div>
-    </section>
-  </main>
-
-  <!-- ================================= DOCK ================================= -->
-  <footer class="dock">
-    <button class="dock-thumb" data-action="open-library" aria-label="Scan history">
-      <img id="last-thumb" src="/static/img/hero-plate.jpg" alt="" />
-      <span class="dock-badge" id="scan-count">0</span>
-    </button>
-
-    <button class="shutter" id="shutter" aria-label="Capture and scan">
-      <span class="shutter-ring"><span class="shutter-core"></span></span>
-    </button>
-
-    <div class="dock-side">
-      <button class="dock-pill" data-action="export-pdf" aria-label="Export history as PDF">
-        <span class="dock-pill-label">PDF</span>
+    <div class="shutter-row">
+      <button class="thumb-btn" data-action="open-history" aria-label="Scan history">
+        <img id="last-thumb" src="/static/img/hero-plate.jpg" alt="" />
+        <span class="thumb-count" id="scan-count" hidden>0</span>
       </button>
-      <button class="dock-upload" data-action="pick-file" aria-label="Scan an image file">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 16v2.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V16" /></svg>
+
+      <button class="shutter" id="shutter" aria-label="Capture">
+        <span class="shutter-inner"></span>
+      </button>
+
+      <button class="flip-btn" data-action="flip-camera" aria-label="Switch camera">
+        <svg viewBox="0 0 24 24"><path d="M4 9a8 8 0 0 1 13.3-4.1L20 7.5M20 15a8 8 0 0 1-13.3 4.1L4 16.5"/><path d="M20 3.5v4h-4M4 20.5v-4h4"/></svg>
       </button>
     </div>
-  </footer>
+  </section>
+</main>
+
+<!-- ═══════════════════════════════════════════════════════════ SHEETS ══ -->
+<div class="sheet-layer" id="sheet-layer" hidden>
+  <div class="sheet-scrim" data-action="close-sheet"></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Detail"></div>
 </div>
 
-<div id="modal-root"></div>
-<div id="signin-root"></div>
+<div class="toast-layer" id="toast-layer" aria-live="polite"></div>
 
 <input type="file" id="file-picker" accept="image/jpeg,image/png,image/webp,image/bmp" hidden />
 <script src="/static/js/app.js" defer></script>
