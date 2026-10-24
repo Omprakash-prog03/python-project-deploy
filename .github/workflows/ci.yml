@@ -40,6 +40,60 @@ jobs:
       - name: Recognition accuracy gate
         run: python scripts/eval_alpr.py
 
+  postgres:
+    name: Postgres integration
+    runs-on: ubuntu-latest
+    needs: test
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: platevision
+          POSTGRES_PASSWORD: platevision
+          POSTGRES_DB: platevision
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U platevision"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ENVIRONMENT: production
+      SECRET_KEY: ci-postgres-secret-key-0123456789abcdef
+      DATABASE_URL: postgresql+psycopg://platevision:platevision@localhost:5432/platevision
+      SEED_DEMO_DATA: "true"
+      ALLOWED_HOSTS: "127.0.0.1,localhost"
+      # The job speaks plain HTTP; a real deployment terminates TLS in front.
+      COOKIE_SECURE: "false"
+      BOOTSTRAP_ON_START: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Prepare schema on Postgres
+        run: |
+          python scripts/init_db.py
+          python scripts/init_db.py   # idempotent re-run
+      - name: Boot with two workers and run the end-to-end smoke suite
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 \
+            --workers 2 --proxy-headers > /tmp/uvicorn.log 2>&1 &
+          API_PID=$!
+          trap 'kill $API_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8000/healthz; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8000/healthz
+          python scripts/smoke.py --base http://127.0.0.1:8000
+          tail -20 /tmp/uvicorn.log
+
   docker:
     name: Build container
     runs-on: ubuntu-latest

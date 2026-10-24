@@ -385,6 +385,11 @@ python scripts/eval_alpr.py         # accuracy gate (CI fails below the configur
 ingest, watchlist enforcement, review, evidence image, analytics, watchlist, CSV export, console
 and metrics. Run it against every environment after a rollout.
 
+CI (`.github/workflows/ci.yml`) does this on every pull request: lint, the 70-test suite on
+Python 3.11 and 3.12, the accuracy gate, a **PostgreSQL 16 service** where `init_db.py` runs
+twice and the smoke suite runs against two workers, and a Docker build whose container must
+answer `/healthz` in production mode before the job is considered green.
+
 ---
 
 ## 16. Troubleshooting
