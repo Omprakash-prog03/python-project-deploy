@@ -178,10 +178,13 @@ cannot take concurrent writers. Raise `WEB_CONCURRENCY` only after moving to Pos
 
 ## 7. Render / Railway
 
-* **Render** — click the *Deploy to Render* button in the README (or create a Blueprint); the
-  blueprint provisions the Docker service, a 5 GB disk at `/var/data`, a generated `SECRET_KEY`,
-  `COOKIE_SECURE=true`, and one worker (SQLite). Add `DATABASE_URL` to move to Postgres and raise
-  `WEB_CONCURRENCY`. The image entrypoint still runs, so the schema is prepared before the worker.
+* **Render** — create a Blueprint from the repo; `render.yaml` ships as the **free** variant: no
+  disk, SQLite and evidence under `/app/storage` (ephemeral), generated `SECRET_KEY`,
+  `COOKIE_SECURE=true`, one worker. Free instances sleep after ~15 minutes idle and cold-start in
+  ~50 s. To move to a paid instance, switch `plan` to `starter`, uncomment the `disk:` block,
+  point `DATABASE_URL`/`STORAGE_DIR`/`MODEL_CACHE_DIR` at `/var/data`, and only then add a
+  managed Postgres and raise `WEB_CONCURRENCY`. The image entrypoint still runs, so the schema
+  is prepared before the worker.
 * **Railway** — `railway.json` selects the Dockerfile builder, `/healthz` health check and
   restart policy, and deliberately inherits the image CMD so the entrypoint runs (config
   validation, schema init, SQLite worker clamp). Mount a volume at `/data` and set

@@ -1,9 +1,19 @@
 # Render blueprint — see https://render.com/docs/blueprint-spec
+#
+# Free tier: no disk, so everything lives on the container's ephemeral
+# filesystem under /app/storage (created and owned by the image). The service
+# sleeps after ~15 minutes of inactivity and cold-starts in ~50 s; data is lost
+# on redeploy. That is the right trade for a demo.
+#
+# To upgrade to a paid instance: set plan: starter, restore the `disk:` block
+# below, point DATABASE_URL/STORAGE_DIR/MODEL_CACHE_DIR at /var/data, and add a
+# managed Postgres (`DATABASE_URL` with postgresql+psycopg://) before raising
+# WEB_CONCURRENCY — SQLite allows a single writer.
 services:
   - type: web
     name: platevision
     runtime: docker
-    plan: starter
+    plan: free
     region: singapore
     healthCheckPath: /healthz
     autoDeploy: true
@@ -15,11 +25,11 @@ services:
       - key: PORT
         value: "8000"
       - key: DATABASE_URL
-        value: sqlite:////var/data/platevision.db
+        value: sqlite:////app/storage/platevision.db
       - key: STORAGE_DIR
-        value: /var/data/uploads
+        value: /app/storage/uploads
       - key: MODEL_CACHE_DIR
-        value: /var/data/models
+        value: /app/storage/models
       - key: SEED_DEMO_DATA
         value: "true"
       - key: ALLOW_DEMO_LOGIN
@@ -32,7 +42,7 @@ services:
       # this (the container forces 1 worker for SQLite regardless).
       - key: WEB_CONCURRENCY
         value: "1"
-    disk:
-      name: platevision-data
-      mountPath: /var/data
-      sizeGB: 5
+    # disk:
+    #   name: platevision-data
+    #   mountPath: /var/data
+    #   sizeGB: 5
