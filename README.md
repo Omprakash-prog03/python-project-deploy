@@ -66,11 +66,16 @@ docker compose up --build
 # → http://localhost:8000  (app + Postgres + persistent volumes)
 ```
 
-The container validates its configuration, prepares the schema once (`scripts/init_db.py`),
-then starts the workers. In production it refuses to boot on a weak `SECRET_KEY`, on
+Every platform above runs the image's entrypoint, so the container validates its configuration,
+prepares the schema once (`scripts/init_db.py`) and then starts the workers. In production it refuses to boot on a weak `SECRET_KEY`, on
 `DEBUG=true`, or on an unreachable S3 bucket instead of quietly falling back to local disk.
 
 ### Deploy to a cloud
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Omprakash-prog03/python-project-deploy)
+
+The Render blueprint provisions the service, a 5 GB disk, a generated `SECRET_KEY` and
+`COOKIE_SECURE=true`. The other targets are one command each:
 
 | Target | Command |
 |---|---|
