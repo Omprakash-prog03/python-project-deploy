@@ -29,7 +29,7 @@ no frames leaving your network.
 | **Self-hosted ALPR** | Detection, perspective rectification, character segmentation, hybrid template/k-NN classification and grammar-constrained decoding. No GPU, no model download, no network calls at inference. |
 | **Jurisdiction grammars** | India (HSRP, standard, commercial, BH-series, defence), US, UK, EU and generic fallbacks. Ambiguous glyphs (`O/0`, `I/1`, `B/8`, `S/5`, `Z/2`) are resolved with an edit-distance dynamic program, not by naive argmax. |
 | **Watchlist enforcement** | Stolen / banned / permit-lapsed / VIP / unpaid categories with severity, near-miss (1-character) matching, and live alerting. |
-| **Operator console** | Dark, editorial single-page app: live KPIs, volume chart, review queue, capture drawer with per-character confidence, watchlist management, camera fleet, insights. |
+| **Camera console** | One dark screen that opens into a live viewfinder: shutter, auto-scan, scan history, per-character confidence, correction-driven training, and server-rendered PDF evidence reports. |
 | **Multi-tenant & RBAC** | Organisation-scoped data, four roles (`viewer → operator → supervisor → admin`), JWT sessions or scoped API keys. |
 | **Audit trail** | Every login, capture, review, correction, export, key and webhook change is appended to an immutable log with request id and IP. |
 | **Signed webhooks** | `capture.created` and `watchlist.hit` delivered with HMAC-SHA256 signatures and retry/backoff. |
@@ -215,6 +215,7 @@ The response carries `watchlist_hit`, `risk_level`, `status` (`verified` / `pend
 | `PATCH` | `/api/v1/captures/{id}` | Verify / flag / deny, correct plate, add note |
 | `POST` | `/api/v1/captures/{id}/reanalyze` | Re-run inference on stored original |
 | `POST` | `/api/v1/captures/{id}/teach` | Correct the reading *and* train the glyph classifier |
+| `GET` | `/api/v1/captures/export.pdf` | Every stored scan as a paginated PDF |
 | `GET` | `/api/v1/learning` | Learned exemplar stats · `DELETE` resets them (admin) |
 | `GET` | `/api/v1/captures/export.csv` | Audited CSV export (≤10 000 rows) |
 | `POST` | `/api/v1/recognize` · `/recognize/annotated` | Stateless read / annotated JPEG |
@@ -250,21 +251,46 @@ assert hmac.compare_digest(expected, request.headers["X-PlateVision-Signature"])
 
 ## Console
 
-The single-page console (`app/static/`) is dependency-free ES2020 — no build step, no CDN,
-so it works in air-gapped deployments.
+The console (`app/static/`) is a camera, not a dashboard: one dark screen that opens straight
+into a live viewfinder. Dependency-free ES2020 — no build step, no CDN — so it works in
+air-gapped deployments.
 
-* **Overview** — greeting header, cinematic hero, live corridor badge, KPI tiles, volume chart
-  (24h / 7d / 30d), watchlist rail, recent activity, high-risk frames.
-* **Scan** — drag-and-drop or camera samples; annotated overlay, per-character confidence
-  chips, alternates, latency and quality readouts.
-* **Library** — filters (needs review, verified, flagged, critical risk), sorting, pagination,
-  audited CSV export, capture drawer with circular review controls.
-* **Watchlist** — visual cards, category mix, recent matches, add-entry modal.
-* **Insights** — plate-type / risk / status breakdowns and camera fleet health.
+* **Viewfinder** — rear camera via `getUserMedia`, crop marks, live plate read-out, and a
+  strip of recent scans sitting on the glass. Falls back to uploading an image when no camera
+  is available or permission is denied.
+* **Shutter** — captures a frame, posts it to `/captures`, and shows the read with
+  per-character confidence.
+* **Live scan** — optional auto mode reads the frame every ~3.2 s and de-duplicates a plate
+  seen within the last 20 s, so a parked car does not create a row per tick.
+* **Scan history** — every stored read, newest first, with thumbnails; tap any row for detail.
+* **PDF export** — one evidence sheet per scan, or the whole history as a paginated
+  contact sheet. Both generated server-side.
+* **Correct & train** — retype a plate and the misread glyphs become training data for that
+  camera (see *Corrections train the reader*).
 
-The layout is mobile-first: below 860 px the rail becomes a floating glass tab bar, exactly
-like the reference design language (near-black canvas, dusk gradients, Cormorant display
-serif, Inter utility type, lilac accent `#C9B8FF`).
+Cut deliberately: KPI tiles, charts, filters, sorting, watchlist UI, camera fleet and audit
+screens. The API still exposes all of it — the console just does not need it to scan a plate.
+
+### PDF reports
+
+`app/services/pdf.py` writes PDF 1.4 directly — no ReportLab, no wkhtmltopdf, no headless
+browser. It owns the object table, cross-reference offsets and page tree; images are embedded
+as `DCTDecode` XObjects and the two text faces ship as 20 kB TrueType subsets in
+`app/assets/pdf/`.
+
+Embedding the fonts is not decoration. The first version used base-14 Helvetica with widths
+from the standard AFM table, and every viewer substituted a different face — Chrome, Preview
+and Acrobat disagreed by up to 19 % on the same string, so right-aligned columns drifted and
+overlapped. Measuring from the same bytes the PDF carries makes the layout identical
+everywhere.
+
+| Report | Endpoint | Contents |
+|---|---|---|
+| Evidence sheet | `GET /api/v1/captures/{id}/report.pdf` | Plate, full frame, confidence, glyphs, provenance |
+| Scan history | `GET /api/v1/captures/export.pdf` | Every stored scan, 7 per page |
+
+The layout is mobile-first: a single column capped at 440 px, with the viewfinder filling the
+screen, a control tray beneath it and a dock (history · shutter · PDF) at the bottom.
 
 ---
 
