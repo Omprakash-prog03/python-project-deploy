@@ -355,14 +355,20 @@
     await scanBlob(blob, { source: 'stream' });
   }
 
+  /* Any surface can ask for a photo; the picker is shared. */
+  function openPicker() {
+    const picker = $('#file-picker');
+    if (picker) picker.click();
+  }
+
   function setMode(mode) {
     state.mode = mode;
-    document.querySelectorAll('.mode').forEach((button) => {
+    document.querySelectorAll('[data-mode]').forEach((button) => {
       const active = button.dataset.mode === mode;
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-selected', String(active));
     });
-    if (mode === 'import') $('#file-picker').click();
+    if (mode === 'import') openPicker();
     scheduleAuto();
   }
 
@@ -391,6 +397,39 @@
     const thumb = $('#last-thumb');
     const latest = state.captures[0];
     if (thumb && latest) thumb.src = latest.thumbnail_url;
+    renderFilmstrip();
+  }
+
+  /* The reference's filmstrip: one row of frames, the newest ringed, dates
+     bookending it. It is a peek at the history, not the history itself —
+     tapping any frame opens the sheet on that scan. */
+  function renderFilmstrip() {
+    const strip = $('#filmstrip');
+    if (!strip) return;
+    const recent = state.captures.slice(0, 12);
+    if (!recent.length) {
+      strip.innerHTML = '<span class="film-empty">No frames yet</span>';
+    } else {
+      strip.innerHTML = recent.map((capture, index) => `
+        <button class="film-cell${index === 0 ? ' is-active' : ''}${
+          capture.watchlist_hit || capture.status === 'flagged' ? ' is-flagged' : ''
+        }" data-action="open-capture" data-id="${esc(capture.id)}" role="listitem"
+                aria-label="${esc(plateOf(capture))}">
+          <img src="${esc(capture.thumbnail_url)}" alt="" loading="lazy" />
+        </button>`).join('');
+    }
+    const oldest = state.captures.length ? state.captures[state.captures.length - 1] : null;
+    const newest = state.captures[0] || null;
+    const stamp = (capture) => {
+      if (!capture) return '—';
+      const date = new Date(capture.created_at);
+      if (Number.isNaN(date.getTime())) return '—';
+      return date.toLocaleDateString([], { day: 'numeric', month: 'short' });
+    };
+    const oldNode = $('#film-oldest');
+    const newNode = $('#film-newest');
+    if (oldNode) oldNode.textContent = stamp(oldest);
+    if (newNode) newNode.textContent = stamp(newest);
   }
 
   /* ──────────────────────────────────────────────────────────── sheets ── */
@@ -448,19 +487,33 @@
       ['Engine', capture.engine_version || '—'],
     ];
 
+    const verdict = capture.format_valid === false
+      ? 'Unverified read'
+      : `${pct(capture.confidence)} confident`;
+
     openSheet(`
       ${navBar(fresh ? 'Plate read' : 'Scan', {
         right: '<button class="nav-btn is-strong" data-action="close-sheet">Done</button>',
       })}
       <div class="sheet-body is-tight">
-        <div class="result-frame">
-          <img src="${esc(capture.image_url)}" alt="Captured frame" />
+
+        <div class="hero">
+          <div class="hero-disc" aria-hidden="true"></div>
+          <div class="hero-card">
+            <img src="${esc(capture.image_url)}" alt="Captured frame" />
+          </div>
         </div>
-        <div class="plate-head">
-          <span class="plate-number">${esc(plateOf(capture))}</span>
-          <span class="plate-conf">${pct(capture.confidence)}</span>
+
+        <p class="hero-kicker">${esc(capture.region_name || capture.region || capture.country || 'Plate')}</p>
+        <h1 class="hero-title">${esc(plateOf(capture))}</h1>
+        <p class="hero-meta">${esc((capture.plate_type || 'Unknown').replace(/^./, (c) => c.toUpperCase()))} plate · ${verdict} · ${Math.round(Number(capture.processing_ms) || 0)} ms</p>
+
+        <div class="hero-actions">
+          <button class="pill-btn" data-action="download-capture" data-id="${esc(capture.id)}">
+            ${icons.share}<span>Download PDF</span>
+          </button>
         </div>
-        <p class="plate-sub">${esc((capture.plate_type || 'Unknown').replace(/^./, (c) => c.toUpperCase()))} plate · read in ${Math.round(Number(capture.processing_ms) || 0)} ms</p>
+
         ${glyphStrip(capture)}
 
         <div class="section-label">Details</div>
@@ -468,15 +521,12 @@
           ${rows.map(([label, value]) => `
             <div class="row">
               <span class="row-label">${esc(label)}</span>
-              <span class="row-value">${esc(value)}</span>
+              <span class="row-value is-mono">${esc(value)}</span>
             </div>`).join('')}
         </div>
 
         <div class="button-stack">
-          <button class="ios-btn is-filled" data-action="download-capture" data-id="${esc(capture.id)}">
-            ${icons.share} Download PDF
-          </button>
-          <button class="ios-btn" data-action="open-correct" data-id="${esc(capture.id)}">
+          <button class="ios-btn is-filled" data-action="open-correct" data-id="${esc(capture.id)}">
             Correct plate
           </button>
         </div>
@@ -590,7 +640,7 @@
           </div>
           <div class="row">
             <span class="row-label">Workspace</span>
-            <span class="row-value">${esc(user.organization || 'Demo workspace')}</span>
+            <span class="row-value">${esc(user.organization?.name || user.organization || 'Demo workspace')}</span>
           </div>
         </div>
 
@@ -682,6 +732,23 @@
     document.body.appendChild(link);
     link.click();
     setTimeout(() => link.remove(), 0);
+  }
+
+  /* The dock's refresh: re-arm the camera, re-read the history, and let the
+     arrow spin while it happens so the tap has feedback. */
+  async function refreshSession() {
+    const button = $('.dock-refresh');
+    button?.classList.add('is-spinning');
+    try {
+      await loadHistory();
+      if (!state.stream) await startCamera();
+      renderThumb();
+      toast('Refreshed');
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      setTimeout(() => button?.classList.remove('is-spinning'), 450);
+    }
   }
 
   /* ─────────────────────────────────────────────────────────── events ── */
@@ -779,6 +846,14 @@
         }
         break;
       }
+
+      case 'import':
+        openPicker();
+        break;
+
+      case 'refresh':
+        await refreshSession();
+        break;
 
       case 'sign-out':
         await signOut();

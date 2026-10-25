@@ -22,9 +22,12 @@
       <svg viewBox="0 0 24 24"><path d="M13 2 4.6 13.4H11l-1.2 8.6L18.6 10.6H12l1-8.6Z"/></svg>
     </button>
 
-    <div class="cam-status" id="cam-status">
-      <span class="status-dot"></span>
-      <span class="status-text" id="status-text">STANDBY</span>
+    <div class="masthead">
+      <span class="wordmark" aria-label="PlateVision">PlateVision</span>
+      <span class="status-line" id="cam-status">
+        <span class="status-dot"></span>
+        <span class="status-text" id="status-text">STANDBY</span>
+      </span>
     </div>
 
     <button class="glass-btn" data-action="open-settings" aria-label="Settings">
@@ -49,6 +52,11 @@
     </div>
 
     <div class="vf-progress" id="vf-progress" hidden><span></span></div>
+
+    <button class="ghost-pill" data-action="import" id="import-pill">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.6" y="6.2" width="18.8" height="13.6" rx="4.2"/><circle cx="12" cy="13" r="4"/><path d="M8.6 6.2 10 3.6h4l1.4 2.6"/></svg>
+      <span>Import a photo</span>
+    </button>
   </section>
 
   <section class="cam-controls">
@@ -60,10 +68,16 @@
       <button class="zoom-pill" data-country="GENERIC">ANY</button>
     </div>
 
-    <div class="mode-row" id="mode-row" role="tablist" aria-label="Capture mode">
-      <button class="mode" data-mode="photo" role="tab">PHOTO</button>
-      <button class="mode is-active" data-mode="scan" role="tab" aria-selected="true">SCAN</button>
-      <button class="mode" data-mode="import" role="tab">IMPORT</button>
+    <div class="transport" id="mode-row" role="tablist" aria-label="Capture mode">
+      <button class="transport-key" data-mode="photo" role="tab" aria-label="Photo" aria-selected="false">
+        <svg viewBox="0 0 24 24"><rect x="2.6" y="6.2" width="18.8" height="13.6" rx="4.2"/><circle cx="12" cy="13" r="4"/><path d="M8.6 6.2 10 3.6h4l1.4 2.6"/></svg>
+      </button>
+      <button class="transport-key is-active" data-mode="scan" role="tab" aria-label="Scan" aria-selected="true">
+        <svg viewBox="0 0 24 24"><path d="M3.4 8V5.4A1.9 1.9 0 0 1 5.3 3.5H8M16 3.5h2.7a1.9 1.9 0 0 1 1.9 1.9V8M20.6 16v2.6a1.9 1.9 0 0 1-1.9 1.9H16M8 20.5H5.3a1.9 1.9 0 0 1-1.9-1.9V16M3.4 12h17.2"/></svg>
+      </button>
+      <button class="transport-key" data-mode="import" role="tab" aria-label="Import" aria-selected="false">
+        <svg viewBox="0 0 24 24"><path d="M12 16.4V3.8M7.4 8.2 12 3.6l4.6 4.6"/><path d="M4.2 15.2v3.4a2 2 0 0 0 2 2h11.6a2 2 0 0 0 2-2v-3.4"/></svg>
+      </button>
     </div>
 
     <div class="shutter-row">
@@ -80,7 +94,36 @@
         <svg viewBox="0 0 24 24"><path d="M4 9a8 8 0 0 1 13.3-4.1L20 7.5M20 15a8 8 0 0 1-13.3 4.1L4 16.5"/><path d="M20 3.5v4h-4M4 20.5v-4h4"/></svg>
       </button>
     </div>
+
+    <div class="timeline">
+      <div class="filmstrip" id="filmstrip" role="list" aria-label="Recent scans"></div>
+      <div class="timeline-meta">
+        <span id="film-oldest">—</span>
+        <span class="timeline-hint">‹‹ swipe history ››</span>
+        <span id="film-newest">—</span>
+      </div>
+    </div>
   </section>
+
+  <nav class="dock" aria-label="History">
+    <button class="dock-round" data-action="open-history" aria-label="Open history">
+      <svg viewBox="0 0 24 24"><path d="M8.6 6.6h12.2M8.6 12h12.2M8.6 17.4h12.2"/><circle cx="4.2" cy="6.6" r="1.15"/><circle cx="4.2" cy="12" r="1.15"/><circle cx="4.2" cy="17.4" r="1.15"/></svg>
+    </button>
+
+    <div class="dock-pill">
+      <span class="dock-favicon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><rect x="2.6" y="6.2" width="18.8" height="13.6" rx="4.2"/><circle cx="12" cy="13" r="4"/><path d="M8.6 6.2 10 3.6h4l1.4 2.6"/></svg>
+      </span>
+      <span class="dock-title" id="dock-title">PlateVision</span>
+      <button class="dock-refresh" data-action="refresh" aria-label="Rescan">
+        <svg viewBox="0 0 24 24"><path d="M19.4 12a7.4 7.4 0 1 1-2.2-5.3"/><path d="M19.8 4.2v4.6h-4.6"/></svg>
+      </button>
+    </div>
+
+    <button class="dock-square" data-action="import" aria-label="Import a photo">
+      <svg viewBox="0 0 24 24"><rect x="3.2" y="6.6" width="12.4" height="12.4" rx="3.2"/><path d="M8.6 3.4h9.2a2.8 2.8 0 0 1 2.8 2.8v9.2"/></svg>
+    </button>
+  </nav>
 </main>
 
 <!-- ═══════════════════════════════════════════════════════════ SHEETS ══ -->

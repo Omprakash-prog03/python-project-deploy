@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import io
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -11,6 +13,8 @@ from app.alpr import grammar, imaging, ocr
 from app.alpr.engine import EngineOptions, get_engine
 from app.core.errors import ValidationFailed
 from app.services import samples
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def _frame(text: str, kind: str = "private") -> bytes:
@@ -162,3 +166,37 @@ def test_annotate_produces_jpeg():
     overlay = annotate(image, result)
     assert overlay[:2] == b"\xff\xd8"
     assert Image.open(io.BytesIO(overlay)).size == image.size
+
+
+# --------------------------------------------------------------- benchmark
+def test_reader_survives_the_degradation_matrix():
+    """A regression floor over the real benchmark corpus.
+
+    The floors sit well below the measured values (61% / 81% over 1000 frames),
+    so this fails on a genuine regression rather than on corpus noise. It is
+    deliberately small — the full sweep lives in ``scripts/bench_alpr.py`` and
+    is too slow for every CI run.
+    """
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from bench_alpr import run
+
+    report = run(120, verbose=False)
+    stats = report.summary()
+
+    assert stats["exact_accuracy"] >= 50.0, stats["exact_accuracy"]
+    assert stats["character_accuracy"] >= 72.0, stats["character_accuracy"]
+    assert stats["false_positive_rate"] <= 6.0, stats["false_positive_rate"]
+
+
+def test_benchmark_flags_tilted_plates():
+    """A plate rotated past the level detector's reach must still be found."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from bench_alpr import MATRIX, render_frame
+
+    tilted = next(item for item in MATRIX if item.name == "tilt-16")
+    hits = 0
+    for seed in range(1, 5):
+        payload = render_frame("MH12AB3456", kind="private", condition=tilted, seed=seed)
+        result = get_engine().recognize(payload, EngineOptions(country="IN"))
+        hits += bool(result.plates)
+    assert hits >= 3, f"detector missed {4 - hits}/4 tilted frames"
