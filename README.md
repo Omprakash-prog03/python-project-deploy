@@ -125,21 +125,70 @@ Design notes worth knowing:
 
 ### Measured accuracy
 
-Sample corpus: 15 plates rendered with the shipped fonts, in both a *clean* setting and a
-*camera-like* setting (rotation ±6.5°, perspective squash, motion blur, sensor noise, JPEG).
+Two harnesses, because they answer different questions.
 
-| Corpus | Exact match | Character accuracy | Warm latency (avg / p95) |
-|---|---|---|---|
-| Clean frames | **15/15 (100%)** | 100.0% | 149 ms / 189 ms |
-| Degraded frames | **14/15 (93.3%)** | 99.3% | 154 ms / 182 ms |
+**`scripts/bench_alpr.py` — the real measurement.** 1000 frames across four plate grammars
+(IN / US / UK / EU) pushed through a fourteen-condition degradation matrix: tilt to 24°,
+motion blur, distance, sensor noise, night, harsh JPEG, dirt, downscale and a combined
+"hard mix". It reports exact match, per-character accuracy, false positives on empty frames
+and latency percentiles, broken down per condition.
 
-Reproduce with `make eval` / `make eval-deg` (or `python scripts/eval_alpr.py --degraded`).
-`scripts/tune_alpr.py` re-tunes the fusion weights against a 36-plate held-out corpus.
+```
+python scripts/bench_alpr.py --rounds 1000
+```
 
-Two defects dominated the miss rate and are fixed in this release: wide letters (`W`, `M`)
-were discarded by the text-line filter, and skewed frames smeared neighbouring glyphs into one
-blob. The reader now keeps any component up to 1.95:1 aspect and deskews the line before
-segmentation, which is why the degraded corpus went from 8/15 to 14/15.
+| | Result |
+|---|---|
+| Exact match | **61.1%** |
+| Character accuracy | **81.1%** |
+| False positives (83 empty frames) | **1 (1.2%)** |
+| Latency p50 / p95 | **163 ms / 454 ms** |
+
+| Condition | Exact | | Condition | Exact |
+|---|---|---|---|---|
+| clean | 94.4% | | night | 54.9% |
+| distant | 91.5% | | motion blur | 55.6% |
+| low JPEG | 85.9% | | dirty plate | 57.8% |
+| sensor noise | 83.1% | | downscaled | 70.4% |
+| tilt 16° | 75.0% | | tilt 24° | 22.2% |
+| heavy blur | 40.3% | | hard mix | 29.6% |
+
+**Read that honestly.** A close, clean, well-lit plate is read essentially every time. A
+distant, tilted, blurred night frame is not: this is a classical template-and-grammar pipeline
+with no trained network, and 61% exact match over a deliberately harsh matrix is what that
+architecture delivers. It is not commercial ANPR accuracy and the table above is the evidence,
+not a marketing claim. The corpus is also synthetic — rendered from the same font family the
+glyph bank uses — so these are an *upper bound* on field performance.
+
+What the number is good for is comparison. Every change to the reader is now judged against it.
+
+**`scripts/eval_alpr.py` — the smoke test.** 15 plates from the shipped pool, clean and
+camera-like. It is fast enough for CI and catches gross breakage, but it over-reports: the
+plates overlap the glyph bank's own tuning data.
+
+| Corpus | Exact match | Character accuracy |
+|---|---|---|
+| Clean frames | **15/15 (100%)** | 100.0% |
+| Degraded frames | **14/15 (93.3%)** | 93.3% |
+
+Defects the benchmark found and this release fixes:
+
+* **Tilted plates were rejected by the detector's own aspect gate.** The candidate box is the
+  axis-aligned bound of a rotated rect, so a 3.2:1 plate measured 1.7:1 and failed the filter.
+  Aspect now comes from the quad, and a rotation sweep covers angles past ~12°, where a
+  horizontal closing kernel smears the plate into one blob.
+* **The rotation sweep mapped boxes through the wrong coordinate space**, leaving every swept
+  candidate offset by the downscale factor.
+* **Two or three rectifications were computed per candidate and all but one discarded.** The
+  variants fail independently, so the engine now votes across them — and a truncated read that
+  merely collected more votes cannot win, because a clipped character is systematic.
+
+Across a 400-frame A/B: character accuracy 79.9% → 82.9%, exact match 60.5% → 61.8%,
+tilt-24 17% → 38%. The cost is latency, 83 ms → 160 ms p50, paid only on frames that need the
+extra hypotheses.
+
+`tests/test_alpr.py` gates both: an accuracy floor and a tilted-plate detection check, set well
+below measured values so they fail on regressions rather than noise.
 
 ### Corrections train the reader
 
@@ -251,31 +300,38 @@ assert hmac.compare_digest(expected, request.headers["X-PlateVision-Signature"])
 
 ## Console
 
-The console (`app/static/`) is a camera app, not a dashboard: it opens straight into a
-full-bleed viewfinder with an automatic demo session, and everything else is an iOS sheet
-sliding over it. Dependency-free ES2020 — no build step, no CDN — so it works in air-gapped
-deployments. Light and dark both follow the system; the viewfinder stays black regardless.
+The console (`app/static/`) is a camera, not a dashboard. It opens straight into a full-bleed
+viewfinder with an automatic demo session; everything else arrives as a sheet over it.
+Dependency-free ES2020 — no build step, no CDN — so it works in air-gapped deployments.
 
-* **Viewfinder** — rear camera via `getUserMedia`, crop marks, live plate read-out, torch and
-  camera flip. Falls back to the poster frame plus image import when no camera is available
-  or permission is denied.
-* **Shutter** — captures a frame, posts it to `/captures`, and raises the result sheet with
-  the plate, the overall confidence and per-character chips.
-* **Live scan** — optional auto mode. The interval adapts to the observed read time
-  (`max(2.6 s, last read x 1.5)`) so a slow instance is never queued, and each tick is
-  gated on a 32x18 luma fingerprint: an unchanged frame is skipped outright, so a parked car
-  does not create a row per tick. Auto-scan pauses while a sheet is open or the tab is hidden.
-* **Jurisdiction** — IN / US / UK / EU / ANY, sent with every frame so the reader applies the
-  right plate grammar.
-* **Scan history** — a Photos-style three-column grid under sticky day headers, with
-  All / Today / This week filters; tap any cell for detail.
-* **PDF export** — one evidence sheet per scan, or the whole history as a paginated
-  contact sheet. Both generated server-side.
+Two materials, kept apart on purpose:
+
+* **The viewfinder is a camera.** Black in both themes, glass chrome, gold reserved for live
+  state. A white camera matrix is not a camera.
+* **Every other surface is paper.** White, generous margins, one hero object, hairlines instead
+  of fills, and type carrying the hierarchy. Follows the system appearance.
+
+* **Signature wordmark** — vendored Sacramento (OFL), set alone at the top.
+* **Ghost pill** — one hairline affordance, *Import a photo*, floating on the viewfinder.
+* **Transport capsule** — one grey pill with three glyphs (photo / scan / import), no labels.
+* **Shutter** — 74 px ring, thumbnail with a count on the left, flip on the right.
+* **Filmstrip** — recent scans in one row, newest ringed with a paper gap, dates bookending
+  the strip and a faint `‹‹ swipe history ››` caption.
+* **Floating dock** — round menu, a pill holding the name and a refresh arrow, and an offset
+  square for import.
+* **Result sheet** — a card floating on white with a disc behind it, a grey kicker over a bold
+  plate, the download as a hairline pill, and per-character confidence as chips.
+* **History** — Photos-style three-column grid under sticky day headers, with
+  All / Today / This week, and the whole history as one PDF.
 * **Correct & train** — retype a plate and the misread glyphs become training data for that
   camera (see *Corrections train the reader*).
 
-On a screen 700 px or wider the camera renders as a phone-shaped column rather than a
-stretched banner, and sheets become popovers sized to that column.
+Auto-scan adapts its interval to the observed read time (`max(2.6 s, last read x 1.5)`) and
+gates each tick on a 32x18 luma fingerprint, so an unchanged scene is skipped instead of being
+re-read. It pauses while a sheet is open or the tab is hidden.
+
+On a screen 700 px or wider the camera renders as a phone-shaped column, and sheets become
+popovers sized to that column.
 
 Cut deliberately: KPI tiles, charts, filters, sorting, watchlist UI, camera fleet and audit
 screens. The API still exposes all of it — the console just does not need it to scan a plate.
