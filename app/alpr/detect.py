@@ -31,6 +31,8 @@ MIN_ASPECT = 1.15
 MAX_ASPECT = 7.2
 MIN_HEIGHT_RATIO = 0.018  # of image height
 MAX_HEIGHT_RATIO = 0.92
+MAX_AREA_RATIO = 0.60     # a plate covering more of the frame than this is a smeared blob
+SWEEP_ANGLES = (-9.0, 9.0, -18.0, 18.0, -27.0, 27.0)
 
 
 def detect(
@@ -47,6 +49,17 @@ def detect(
     morph = _morph_candidates(gray)
     counts["morph"] = len(morph)
     proposals.extend(morph)
+
+    # The sweep costs six extra detector passes, so it only runs when the level
+    # pass looks wrong. An oversized blob is that signal: a plate tilted past
+    # ~12 degrees smears into one wide contour instead of a plate-shaped one,
+    # and nearly every frame that needs the sweep shows it.
+    if not morph or max((_area_ratio(cand, w, h) for cand in morph), default=0.0) > 0.30:
+        tilted = _rotation_sweep(gray)
+        counts["sweep"] = len(tilted)
+        proposals.extend(tilted)
+    else:
+        counts["sweep"] = 0
 
     mser = _mser_candidates(gray)
     counts["mser"] = len(mser)
@@ -75,9 +88,9 @@ def detect(
             continue
         if box.w < 40 or box.h < 12:
             continue
-        if not MIN_ASPECT <= box.aspect <= MAX_ASPECT:
+        if not MIN_ASPECT <= _true_aspect(cand) <= MAX_ASPECT:
             continue
-        if box.area > 0.82 * w * h:
+        if _quad_area(cand) > MAX_AREA_RATIO * w * h:
             continue
         cand.box = box
         valid.append(cand)
@@ -86,6 +99,124 @@ def detect(
     ranked = _rank(enriched, gray)
     picked = _nms(ranked, iou_threshold=0.88, max_items=max_candidates)
     return picked, counts
+
+
+def _rotation_sweep(gray: np.ndarray) -> list[Candidate]:
+    """Re-run the morphological pass on rotated copies of the frame.
+
+    A plate tilted by more than ~12 degrees smears into a single horizontal
+    blob under a level closing kernel, which then loses to a bogus whole-frame
+    proposal. Rotating the *image* instead makes the plate level, so the same
+    detector that already works on straight plates finds it again. Each hit is
+    mapped back through the inverse rotation, carrying its quad, so the engine
+    can still rectify the crop.
+    """
+    if cv2 is None or gray.size == 0:
+        return []
+    h, w = gray.shape[:2]
+    # Work on a reduced copy: the detector only needs geometry, and this keeps
+    # six extra passes inside a few milliseconds.
+    work, scale = (gray, 1.0)
+    if max(h, w) > 900:
+        work, scale = imaging.resize_max(gray, 900)
+    wh, ww = work.shape[:2]
+    centre = (ww / 2, wh / 2)
+    out: list[Candidate] = []
+    for angle in SWEEP_ANGLES:
+        matrix = cv2.getRotationMatrix2D(centre, angle, 1.0)
+        rotated = cv2.warpAffine(
+            work, matrix, (ww, wh),
+            flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE,
+        )
+        inverse = cv2.invertAffineTransform(matrix)
+        for cand in _morph_candidates(rotated):
+            # The sweep runs on a reduced copy, so mapping back lands in reduced
+            # coordinates; rescale into the frame the caller handed us or every
+            # swept box sits a few percent off the plate it describes.
+            box, quad = _map_back(cand, inverse, scale)
+            if box.w < 40 or box.h < 12:
+                continue
+            box = box.clip(w, h)
+            if not MIN_ASPECT <= _true_aspect(cand) <= MAX_ASPECT:
+                continue
+            if _quad_area(Candidate(box=box, score=0.0, strategy="sweep", quad=quad)) > MAX_AREA_RATIO * w * h:
+                continue
+            # A sweep hit is slightly less trustworthy than a level one: the
+            # rotation resamples the glyph edges that the reader depends on.
+            out.append(
+                Candidate(
+                    box=box,
+                    score=cand.score * 0.96,
+                    strategy=f"morph-rot{int(angle)}",
+                    quad=quad,
+                )
+            )
+    return out
+
+
+def _area_ratio(cand: Candidate, width: int, height: int) -> float:
+    return _quad_area(cand) / max(1.0, float(width * height))
+
+
+def _quad_sides(cand: Candidate) -> tuple[float, float]:
+    """Long and short edge lengths of the candidate's rotated rect."""
+    if not cand.quad or len(cand.quad) != 4:
+        return float(max(cand.box.w, cand.box.h)), float(max(1, min(cand.box.w, cand.box.h)))
+    edges = []
+    for index in range(4):
+        x0, y0 = cand.quad[index]
+        x1, y1 = cand.quad[(index + 1) % 4]
+        edges.append(((float(x1) - float(x0)) ** 2 + (float(y1) - float(y0)) ** 2) ** 0.5)
+    return max(edges), max(1e-6, min(edges))
+
+
+def _true_aspect(cand: Candidate) -> float:
+    long_side, short_side = _quad_sides(cand)
+    return long_side / short_side
+
+
+def _quad_area(cand: Candidate) -> float:
+    """True area of the rotated plate rect, not its axis-aligned bounding box.
+
+    A plate tilted 18 degrees has an AABB roughly twice its real footprint, so
+    testing the AABB against an area cap throws away exactly the tilted plates
+    the rotation sweep exists to find.
+    """
+    if not cand.quad or len(cand.quad) != 4:
+        return float(cand.box.area)
+    total = 0.0
+    for index in range(4):
+        x0, y0 = cand.quad[index]
+        x1, y1 = cand.quad[(index + 1) % 4]
+        total += float(x0) * float(y1) - float(x1) * float(y0)
+    return abs(total) / 2.0
+
+
+def _map_back(
+    cand: Candidate, inverse: np.ndarray, scale: float = 1.0
+) -> tuple[Box, list[list[float]] | None]:
+    """Map a candidate from rotated space back into original coordinates.
+
+    ``scale`` is the factor the sweep's working copy was shrunk by, so dividing
+    by it restores full-resolution coordinates.
+    """
+    points = (
+        [[cand.box.x, cand.box.y], [cand.box.x2, cand.box.y], [cand.box.x2, cand.box.y2], [cand.box.x, cand.box.y2]]
+        if cand.quad is None
+        else cand.quad
+    )
+    factor = 1.0 / (scale if scale > 0 else 1.0)
+    mapped = [
+        [
+            (inverse[0, 0] * float(px) + inverse[0, 1] * float(py) + inverse[0, 2]) * factor,
+            (inverse[1, 0] * float(px) + inverse[1, 1] * float(py) + inverse[1, 2]) * factor,
+        ]
+        for px, py in points
+    ]
+    xs = [p[0] for p in mapped]
+    ys = [p[1] for p in mapped]
+    box = Box(int(min(xs)), int(min(ys)), max(1, int(max(xs) - min(xs))), max(1, int(max(ys) - min(ys))))
+    return box, [[round(x, 1), round(y, 1)] for x, y in mapped] if cand.quad else None
 
 
 def _enrich(candidates: list[Candidate], width: int, height: int) -> list[Candidate]:

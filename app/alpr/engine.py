@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -12,7 +12,11 @@ from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
-ENGINE_VERSION = "pv-alpr/1.2"
+ENGINE_VERSION = "pv-alpr/1.3"
+
+# Below this confidence a read that also fails every known plate grammar is
+# treated as noise rather than as a plate.
+UNVERIFIED_FLOOR = 0.55
 
 
 @dataclass(slots=True)
@@ -60,6 +64,13 @@ class ALPREngine:
             if reading is None:
                 continue
             if reading.confidence < max(opts.min_confidence, 0.05):
+                continue
+            # A read that fits no jurisdiction's grammar and is not confident
+            # either is a guess, and a confident-looking wrong plate is worse
+            # than no plate at all downstream. Drop it here rather than letting
+            # it reach an operator who has no way to tell it apart from a real
+            # one.
+            if not reading.format_valid and reading.confidence < UNVERIFIED_FLOOR:
                 continue
             if any(_same_plate(reading, other) for other in plates):
                 continue
@@ -116,18 +127,23 @@ class ALPREngine:
         if crop.size == 0 or crop.shape[0] < 12:
             return None
 
-        aspect = max(1.4, min(7.5, box.w / max(1, box.h)))
-        best: PlateReading | None = None
+        aspect = max(1.4, min(7.5, _candidate_aspect(candidate)))
+        readings: list[PlateReading] = []
         for variant in self._rectify_variants(gray, crop, candidate, aspect):
             reading = self._read_rectified(variant[0], variant[1], box, candidate, opts, scale)
             if reading is None:
                 continue
-            if best is None or _rank_key(reading) > _rank_key(best):
-                best = reading
-            # A confident, format-valid read short-circuits the remaining work.
-            if best.format_valid and best.confidence >= 0.82:
+            readings.append(reading)
+            # Only a unanimous-looking read is worth stopping for. A single
+            # confident variant is not enough evidence when the frame is
+            # degraded, and that is precisely when a second opinion pays.
+            if (
+                reading.format_valid
+                and reading.confidence >= 0.9
+                and _min_glyph_confidence(reading) >= 0.72
+            ):
                 break
-        return best
+        return _consensus(readings)
 
     @staticmethod
     def _rectify_variants(
@@ -136,14 +152,35 @@ class ALPREngine:
         candidate: detect.Candidate,
         aspect: float,
     ):
-        """Yield (rectified_image, target_height) hypotheses, best first."""
-        heights = [128, 96]
+        """Yield (rectified_image, target_height) hypotheses, best first.
+
+        Resolution matters more than it looks. A plate 40 px tall in the frame
+        is only ~5 px per stroke; downsampling that to a 96 px strip throws away
+        the very edges the segmenter needs, and a blurred plate loses them
+        twice. Upscaling the small ones and sharpening the result keeps the
+        strokes separable, which is the difference between ``MH12AB3456`` and
+        ``MH12M3456``. Big crops still go through a cheap downscale first,
+        because a 400 px plate does not need interpolation to read well.
+        """
+        # Two hypotheses per candidate: the reader gets a second opinion
+        # without paying for a third, and consensus still has something to
+        # compare. Three resolutions measured slower without reading better.
+        source_h = crop.shape[0]
+        heights = (192, 128) if source_h < 140 else (128, 192)
         for target_h in heights:
-            target_w = int(min(760, max(72, target_h * aspect)))
-            yield imaging.resize(crop, (target_w, target_h)), target_h
+            target_w = int(min(900, max(72, target_h * aspect)))
+            resized = imaging.resize(crop, (target_w, target_h))
+            if target_h >= 192:
+                # LANCZOS-style upscale leaves soft edges; one unsharp pass
+                # restores the contrast the glyph bank was rendered with.
+                yield imaging.sharpen(resized, amount=0.9), target_h
+            else:
+                yield resized, target_h
             if candidate.quad and len(candidate.quad) == 4:
                 warped = imaging.warp_perspective(gray, candidate.quad, (target_w, target_h))
                 if warped.size:
+                    if target_h >= 192:
+                        warped = imaging.sharpen(warped, amount=0.9)
                     yield warped, target_h
 
     def _read_rectified(
@@ -241,6 +278,108 @@ class ALPREngine:
                 "target_height": target_h,
             },
         )
+
+
+def _candidate_aspect(candidate: detect.Candidate) -> float:
+    """Plate aspect from the rotated rect when one exists.
+
+    ``box`` is the axis-aligned bound, so a tilted plate reads as ~1.8:1 instead
+    of its real ~3.2:1. Using that number to size the rectified crop squashes
+    the glyphs horizontally, which is one of the largest single sources of
+    misreads on angled captures.
+    """
+    quad = candidate.quad
+    if quad and len(quad) == 4:
+        edges = []
+        for index in range(4):
+            x0, y0 = quad[index]
+            x1, y1 = quad[(index + 1) % 4]
+            edges.append((((x1 - x0) ** 2) + ((y1 - y0) ** 2)) ** 0.5)
+        long_side, short_side = max(edges), max(1e-6, min(edges))
+        return float(long_side / short_side)
+    return candidate.box.w / max(1, candidate.box.h)
+
+
+def _min_glyph_confidence(reading: PlateReading) -> float:
+    if not reading.glyphs:
+        return 0.0
+    return min(glyph.confidence for glyph in reading.glyphs)
+
+
+def _consensus(readings: list[PlateReading]) -> PlateReading | None:
+    """Pick the reading the variants agree on, not just the single best one.
+
+    Every candidate is read several times — at two or three resolutions, straight
+    and perspective-warped. Those variants fail *independently*: blur that turns
+    a ``B`` into an ``8`` at 96 px often reads correctly at 192 px, and the warp
+    fixes errors the straight crop introduces. Taking only the top-ranked
+    variant throws that redundancy away and lets one bad hypothesis decide the
+    plate.
+
+    Grouping the variants and letting agreement win turns it into a small
+    ensemble: a string read by three variants beats a higher-scoring string read
+    by one, which is what removes the random ``B``/``8`` flips.
+    """
+    if not readings:
+        return None
+    if len(readings) == 1:
+        return readings[0]
+
+    groups: dict[str, list[PlateReading]] = {}
+    for reading in readings:
+        groups.setdefault(grammar.normalize(reading.plate), []).append(reading)
+
+    def group_key(members: list[PlateReading]) -> tuple[float, float, float]:
+        # Agreement first, then summed evidence, then best single read.
+        return (
+            float(len(members)),
+            sum(member.confidence for member in members),
+            max(member.confidence for member in members),
+        )
+
+    winner = max(groups.values(), key=group_key)
+    winner = _prefer_untruncated(winner, groups)
+    chosen = max(winner, key=_rank_key)
+    if len(winner) == len(readings) and len(winner) > 1:
+        # Unanimous: every variant independently arrived at the same plate.
+        boost = 1.0 + min(0.06, 0.02 * (len(winner) - 1))
+        chosen = replace(chosen, confidence=float(min(0.995, chosen.confidence * boost)))
+    elif len(winner) == 1:
+        # A lone dissenting read is the least trustworthy outcome of all, so it
+        # is damped rather than presented at face value.
+        chosen = replace(chosen, confidence=chosen.confidence * 0.86)
+    return chosen
+
+
+def _is_subsequence(short: str, long: str) -> bool:
+    iterator = iter(long)
+    return all(char in iterator for char in short)
+
+
+def _prefer_untruncated(
+    winner: list[PlateReading], groups: dict[str, list[PlateReading]]
+) -> list[PlateReading]:
+    """Prefer a complete read over a truncated one that merely got more votes.
+
+    A clipped leading or trailing character is *systematic*: the crop is the
+    same for every variant, so they all lose the same character and agreement
+    cannot rescue it. Worse, consensus then actively promotes the truncated
+    string because it is self-consistent. A plate that is a strict subsequence
+    of a format-valid rival is almost always the clipped version, so the rival
+    wins whenever it has comparable support.
+    """
+    best = max(winner, key=_rank_key)
+    if not best.format_valid:
+        return winner
+    for members in groups.values():
+        if members is winner or len(members) < len(winner) - 1:
+            continue
+        rival = max(members, key=_rank_key)
+        if not rival.format_valid or len(rival.plate) <= len(best.plate):
+            continue
+        if _is_subsequence(grammar.normalize(best.plate), grammar.normalize(rival.plate)):
+            return members
+    return winner
 
 
 def _rank_key(reading: PlateReading) -> tuple[float, float]:
