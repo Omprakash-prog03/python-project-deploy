@@ -28,7 +28,7 @@ docker/entrypoint.sh
 ├── validate SECRET_KEY (production, ≥32 chars)          → exit 1 on failure
 ├── mkdir STORAGE_DIR / MODEL_CACHE_DIR
 ├── force WEB_CONCURRENCY=1 for SQLite
-├── python scripts/init_db.py
+├── python scripts/init_db.py --schema-only
 │     ├── wait up to 45 s for the database (compose/k8s friendly)
 │     ├── take a lock (Postgres advisory lock / SQLite flock)   ← replica-safe
 │     ├── create missing tables
@@ -132,7 +132,9 @@ docker compose exec api python scripts/init_db.py --seed    # only if SEED_DEMO_
 ```
 
 Volumes: `captures` (evidence), `models` (glyph cache), `pgdata`. The API waits for the database
-healthcheck, runs `init_db.py`, then starts two workers.
+healthcheck, runs `init_db.py --schema-only`, then starts two workers. Demo seeding and the
+glyph-bank build run on a background thread inside the app once the port is bound, so a slow
+seed cannot make a deploy time out.
 
 ## 5. Kubernetes
 
@@ -204,7 +206,7 @@ After=network.target
 User=platevision
 WorkingDirectory=/opt/platevision
 EnvironmentFile=/etc/platevision.env
-ExecStartPre=/opt/platevision/.venv/bin/python scripts/init_db.py
+ExecStartPre=/opt/platevision/.venv/bin/python scripts/init_db.py --schema-only
 ExecStart=/opt/platevision/.venv/bin/uvicorn app.main:app \
   --host 127.0.0.1 --port 8000 --workers 2 --proxy-headers
 Restart=always

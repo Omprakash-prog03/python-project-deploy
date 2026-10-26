@@ -67,8 +67,24 @@ docker compose up --build
 ```
 
 Every platform above runs the image's entrypoint, so the container validates its configuration,
-prepares the schema once (`scripts/init_db.py`) and then starts the workers. In production it refuses to boot on a weak `SECRET_KEY`, on
-`DEBUG=true`, or on an unreachable S3 bucket instead of quietly falling back to local disk.
+creates the schema once (`scripts/init_db.py --schema-only`) and then starts the workers. In
+production it refuses to boot on a weak `SECRET_KEY`, on `DEBUG=true`, or on an unreachable S3
+bucket instead of quietly falling back to local disk.
+
+Nothing that can take an unbounded amount of time runs before the port is bound. Demo seeding
+and the glyph-bank build happen on a background thread once the server is already answering;
+only schema creation is synchronous, because a request must never see missing tables. This
+matters because a deployment platform treats "did not bind a port in time" as a failed deploy —
+and an earlier version of this code spent fifteen minutes re-reading its demo fixtures before
+uvicorn was allowed to start. The frozen readings behind that are in
+`app/assets/seed/recognitions.json`, rebuilt with `python scripts/build_seed_cache.py`.
+
+| Boot step | Before | Now |
+|---|---|---|
+| Schema | 0.4 s | 0.4 s |
+| Demo seeding | ~15 min (34 live OCR passes) | **3.6 s** (replay) |
+| Glyph bank | 1–30 s (cold) | 1.3 s, in background |
+| Port bound | after all of the above | **immediately** |
 
 ### Deploy to a cloud
 
@@ -84,7 +100,7 @@ The Render blueprint provisions the service, a 5 GB disk, a generated `SECRET_KE
 | Render | New Blueprint → point at this repo (`render.yaml`) |
 | Railway | New project → Deploy from repo (`railway.json`, Dockerfile build) |
 | Any VM | `docker build -t platevision . && docker run -p 8000:8000 --env-file .env platevision` |
-| Bare metal | `python scripts/init_db.py && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers` |
+| Bare metal | `python scripts/init_db.py --schema-only && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers` |
 
 Postgres is supported out of the box (`psycopg[binary]` is a pinned dependency, driver URL scheme
 `postgresql+psycopg://`); object storage is an optional extra (`requirements-s3.txt`, or build

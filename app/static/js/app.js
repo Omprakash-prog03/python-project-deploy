@@ -883,8 +883,26 @@
   window.addEventListener('pagehide', stopCamera);
 
   /* ───────────────────────────────────────────────────────────── boot ── */
-  async function afterSignIn() {
+  /**
+   * Load history, and if it comes back empty, look again shortly.
+   *
+   * A cold instance provisions its demo workspace on a background thread once
+   * it is already serving, so for the first few seconds the API truthfully
+   * answers "no captures". Without this, a visitor during boot would be told
+   * their history is empty and have to reload. Three checks over ~12 s covers
+   * a cold seed without spinning forever.
+   */
+  async function loadHistoryWithRetry(attempts = 3, delayMs = 4000) {
     await loadHistory();
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (state.captures.length || state.total) return;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await loadHistory();
+    }
+  }
+
+  async function afterSignIn() {
+    await loadHistoryWithRetry();
     startCamera();
   }
 

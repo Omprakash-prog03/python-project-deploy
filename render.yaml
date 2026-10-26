@@ -2,8 +2,17 @@
 #
 # Free tier: no disk, so everything lives on the container's ephemeral
 # filesystem under /app/storage (created and owned by the image). The service
-# sleeps after ~15 minutes of inactivity and cold-starts in ~50 s; data is lost
-# on redeploy. That is the right trade for a demo.
+# sleeps after ~15 minutes of inactivity and cold-starts in well under a minute;
+# data is lost on redeploy, so the demo re-seeds itself on every wake-up.
+#
+# Do not set PORT here. Render injects its own and routes to it; pinning 8000
+# makes the app bind a port the platform is not watching.
+#
+# The image's entrypoint creates the schema only, then hands over to uvicorn.
+# Demo seeding and the glyph bank build run on a background thread *after* the
+# port is bound — see app/services/bootstrap.py. Seeding used to run before the
+# port was bound and took ~15 minutes of real OCR on free-tier CPU, which is
+# what made deploys fail with "no open ports detected".
 #
 # To upgrade to a paid instance: set plan: starter, restore the `disk:` block
 # below, point DATABASE_URL/STORAGE_DIR/MODEL_CACHE_DIR at /var/data, and add a
@@ -22,8 +31,6 @@ services:
         value: production
       - key: SECRET_KEY
         generateValue: true
-      - key: PORT
-        value: "8000"
       - key: DATABASE_URL
         value: sqlite:////app/storage/platevision.db
       - key: STORAGE_DIR

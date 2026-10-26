@@ -45,8 +45,11 @@ case "${1:-}" in
 esac
 
 log "Preparing database …"
-# init_db.py honours SEED_DEMO_DATA itself, so no flag juggling here.
-python scripts/init_db.py
+# Schema only. Demo seeding used to happen here and it was the reason deploys
+# timed out: 34 real OCR passes on a free-tier CPU is a quarter of an hour, and
+# none of it can start until this finishes because uvicorn has not bound a port
+# yet. The app now seeds itself on a background thread once it is serving.
+python scripts/init_db.py --schema-only
 
 log "Starting application …"
 exec "$@"
