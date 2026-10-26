@@ -23,7 +23,8 @@ from app.core.errors import AppError, error_body
 from app.core.logging import configure_logging, get_logger, set_request_context
 from app.core.metrics import metrics
 from app.core.ratelimit import TokenBucketLimiter
-from app.db.session import Base, SessionLocal, engine
+from app.db.session import SessionLocal
+from app.services import bootstrap
 
 configure_logging()
 logger = get_logger("platevision")
@@ -34,25 +35,23 @@ STATIC_DIR = PROJECT_ROOT / "app" / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting %s v%s (%s)", settings.app_name, settings.version, settings.environment)
-    Base.metadata.create_all(bind=engine)
-    if settings.seed_demo_data:
-        try:
-            from app.seed import seed_if_empty
 
-            with SessionLocal() as db:
-                created = seed_if_empty(db)
-            if created:
-                logger.info("Demo workspace provisioned")
-        except Exception:  # pragma: no cover - never block startup on demo data
-            logger.warning("Demo seeding skipped", exc_info=True)
-    # Warm the glyph bank so the first recognition request is fast.
+    # Only the schema is created before we serve. Everything with an
+    # unpredictable cost — demo seeding, glyph-bank construction — happens on a
+    # background thread after the port is bound. Blocking startup on that work
+    # is what made deploys fail with "no open ports detected": the free tier
+    # takes minutes to seed, and the platform will not wait.
     try:
-        from app.alpr.ocr import get_classifier
+        bootstrap.create_schema(quiet=True)
+    except Exception:  # pragma: no cover - surface the real error on first request
+        logger.warning("Schema creation failed during startup", exc_info=True)
 
-        get_classifier()._ensure()
-    except Exception:  # pragma: no cover
-        logger.warning("Glyph bank warm-up failed", exc_info=True)
+    app.state.bootstrap_thread = bootstrap.start_background_bootstrap(
+        seed=settings.seed_demo_data,
+        warm=True,
+    )
     app.state.started_at = time.time()
+
     if settings.warnings:
         logger.warning(
             "Configuration advisories in %s: %s",
@@ -60,7 +59,8 @@ async def lifespan(app: FastAPI):
             ", ".join(settings.warnings),
         )
     logger.info(
-        "Ready — %s backend, storage=%s, engine warm. Docs at /docs, console at /",
+        "Serving — %s backend, storage=%s; demo seed and engine warm-up running in "
+        "the background. Docs at /docs, console at /",
         settings.backend_kind,
         settings.storage_backend,
     )

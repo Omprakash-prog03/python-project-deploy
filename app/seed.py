@@ -1,17 +1,28 @@
 """Idempotent demo-workspace provisioning.
 
-Everything is produced by running the *real* pipeline over synthetic frames, so
-the dashboard shows genuine detections, confidence scores and timings.
+Everything here is produced by the *real* pipeline over synthetic frames, so the
+demo shows genuine detections, confidence scores and timings rather than
+fabricated JSON.
+
+Those readings are frozen at build time in ``app/assets/seed/recognitions.json``
+(see ``scripts/build_seed_cache.py``) instead of being recomputed on boot. A free
+tier CPU needs 17-34 s per frame, so re-reading 34 fixtures cost a quarter of an
+hour on every cold start — before the port was even bound, which is what made
+deploys time out. Replaying the frozen reading keeps the demo authentic and makes
+seeding a couple of seconds of image rendering.
 """
 from __future__ import annotations
 
+import json
 import random
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from app.alpr.types import RecognitionResult
+from app.core.config import PROJECT_ROOT, settings
 from app.core.logging import get_logger
 from app.core.security import hash_password
 from app.models.entities import (
@@ -21,7 +32,7 @@ from app.models.entities import (
     User,
     WatchlistEntry,
 )
-from app.services import recognition, samples
+from app.services import recognition, samples, seed_cache
 
 logger = get_logger(__name__)
 
@@ -53,6 +64,39 @@ WATCHLIST = [
     ("HR26DK8337", "Toll evasion", "unpaid", "medium", "₹18,400 outstanding across 11 crossings"),
     ("KA05MJ4412", "Insurance lapsed", "other", "low", "Policy expired — advisory only"),
 ]
+
+
+SEED_CACHE_PATH = PROJECT_ROOT / "app" / "assets" / "seed" / "recognitions.json"
+
+
+@lru_cache(maxsize=1)
+def _load_recognition_cache() -> dict[str, dict]:
+    """Frozen readings for the demo fixtures, keyed by fixture index.
+
+    Missing or corrupt cache degrades to the live pipeline rather than failing a
+    boot: a slow demo is much better than no demo.
+    """
+    try:
+        payload = json.loads(SEED_CACHE_PATH.read_text())
+    except FileNotFoundError:
+        logger.warning("Seed recognition cache missing; demo frames will be re-read live")
+        return {}
+    except Exception:
+        logger.warning("Seed recognition cache unreadable; demo frames will be re-read live",
+                       exc_info=True)
+        return {}
+    return payload.get("recognitions", {})
+
+
+def _cached_reading(index: int) -> RecognitionResult | None:
+    raw = _load_recognition_cache().get(str(index))
+    if raw is None:
+        return None
+    try:
+        return seed_cache.deserialize(raw)
+    except Exception:  # pragma: no cover - defensive against a hand-edited cache
+        logger.warning("Could not rebuild cached reading for frame %s", index, exc_info=True)
+        return None
 
 
 def seed_if_empty(db: Session) -> bool:
@@ -170,6 +214,7 @@ def _seed_captures(
                 source="stream",
                 lat=19.31 + rng.uniform(-0.12, 0.12),
                 lon=84.79 + rng.uniform(-0.12, 0.12),
+                result=_cached_reading(item["index"]),
             )
         except Exception:  # pragma: no cover - a single bad frame must not abort seeding
             logger.warning("Seed frame %s failed", item["index"], exc_info=True)

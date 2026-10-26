@@ -44,7 +44,9 @@ compose:
 	docker compose up --build
 
 init-db:
-	python scripts/init_db.py
+	# Local setup seeds eagerly; the container uses --schema-only and lets the
+	# app seed itself in the background once it is serving.
+	python scripts/init_db.py --seed
 
 smoke:
 	python scripts/smoke.py --base $${BASE:-http://localhost:8000}

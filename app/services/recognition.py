@@ -8,7 +8,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.alpr import grammar, imaging
-from app.alpr.engine import EngineOptions, get_engine
+from app.alpr.engine import ENGINE_VERSION, EngineOptions, get_engine
 from app.alpr.types import RecognitionResult
 from app.core.config import settings
 from app.core.errors import PayloadTooLarge, ValidationFailed
@@ -98,6 +98,7 @@ def ingest(
     source: str = "upload",
     lat: float | None = None,
     lon: float | None = None,
+    result: RecognitionResult | None = None,
 ) -> tuple[Capture, RecognitionResult]:
     validate_upload(data)
     image = imaging.load_image(data)
@@ -112,7 +113,20 @@ def ingest(
         country=country or settings.alpr_default_country,
         max_candidates=settings.alpr_max_candidates,
     )
-    result = get_engine().recognize(data, options)
+    # A caller may supply an already-computed reading. Demo seeding uses this to
+    # replay a frozen result instead of re-running OCR over fixtures it has
+    # recognised hundreds of times before. Live uploads always take the ``None``
+    # path, so this changes nothing for a real scan — and a cache written by an
+    # older engine is discarded rather than trusted.
+    if result is None:
+        result = get_engine().recognize(data, options)
+    elif result.engine_version != ENGINE_VERSION:
+        logger.warning(
+            "Precomputed reading came from %s, engine is %s — re-reading",
+            result.engine_version,
+            ENGINE_VERSION,
+        )
+        result = get_engine().recognize(data, options)
     best = result.best
 
     watchlist_entry = lookup_watchlist(db, org.id, best.plate if best else None)
