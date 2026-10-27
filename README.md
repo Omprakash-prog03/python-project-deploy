@@ -139,6 +139,17 @@ Design notes worth knowing:
   reader tries padded and merged boxes plus two rectification resolutions and keeps the
   highest-confidence, format-valid interpretation.
 
+### Optional hosted reader
+
+The pipeline above is the default and needs no network or credentials. If you
+want a vendor's models instead, `ALPR_ENGINE=parkpow` routes reads through Plate
+Recognizer's hosted API — the same backend that
+`parkpow/deep-license-plate-recognition` calls, which is a **client with no
+model weights in it**. It is opt-in and wrapped: no key, or any remote failure,
+and the local pipeline answers, so a deploy cannot break for want of a
+credential. Accuracy, cost, privacy and latency trade-offs are set out in
+[docs/remote-reader.md](docs/remote-reader.md).
+
 ### Measured accuracy
 
 Two harnesses, because they answer different questions.

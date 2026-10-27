@@ -66,6 +66,19 @@ class Settings(BaseSettings):
     alpr_duplicate_window_seconds: int = 90
     alpr_watchlist_threshold: float = 0.86
 
+    # ------------------------------------------------- remote reader (optional)
+    # The local OpenCV pipeline is the default and needs no credentials. Setting
+    # ALPR_ENGINE=parkpow routes reads through Plate Recognizer's hosted API
+    # instead; if the key is absent or the call fails, the local engine answers,
+    # so a misconfiguration degrades accuracy rather than breaking the service.
+    alpr_engine: Literal["local", "parkpow"] = "local"
+    parkpow_api_key: str | None = None
+    parkpow_base_url: str = "https://api.platerecognizer.com"
+    parkpow_timeout_seconds: float = 8.0
+    parkpow_regions: str = ""
+    parkpow_camera_id: str | None = None
+    parkpow_retries: int = 2
+
     # ------------------------------------------------------------------ http
     max_upload_mb: int = 12
     cors_origins: str = "*"
@@ -114,6 +127,15 @@ class Settings(BaseSettings):
     @property
     def country_list(self) -> list[str]:
         return [c.strip().upper() for c in self.alpr_countries.split(",") if c.strip()]
+
+    @property
+    def parkpow_region_list(self) -> list[str]:
+        return [r.strip().lower() for r in self.parkpow_regions.split(",") if r.strip()]
+
+    @property
+    def parkpow_configured(self) -> bool:
+        """True only when the remote reader was asked for *and* has credentials."""
+        return self.alpr_engine == "parkpow" and bool((self.parkpow_api_key or "").strip())
 
     @property
     def is_production(self) -> bool:

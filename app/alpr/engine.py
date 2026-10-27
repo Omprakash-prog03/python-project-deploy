@@ -423,11 +423,77 @@ def _iou(a: Box, b: Box) -> float:
     return inter / union if union else 0.0
 
 
-_engine: ALPREngine | None = None
+_engine: FallbackEngine | ALPREngine | None = None
 
 
-def get_engine() -> ALPREngine:
+class FallbackEngine:
+    """Tries the remote reader first, and answers locally when it cannot.
+
+    Wrapping rather than replacing is the whole point: every caller already
+    speaks ``recognize(bytes, options)``, so this is the only place that has to
+    know a remote backend exists. If the API is down, rate-limited, slow or
+    simply not configured, the request still returns a plate.
+    """
+
+    def __init__(self, primary, local: ALPREngine) -> None:
+        self.primary = primary
+        self.local = local
+        self.version = f"{local.version}+remote"
+
+    @property
+    def classifier(self):
+        # The health check inspects the local classifier; keep the attribute.
+        return self.local.classifier
+
+    @property
+    def active_engine(self) -> str:
+        return getattr(self.primary, "name", "remote") if self.primary else "local"
+
+    def recognize(self, image_bytes: bytes, options: EngineOptions | None = None) -> RecognitionResult:
+        if self.primary is not None:
+            try:
+                result = self.primary.recognize(image_bytes, options)
+            except Exception as exc:  # any remote fault falls back
+                logger.warning(
+                    "remote engine failed, using local pipeline",
+                    extra={"error": str(exc)}, exc_info=False,
+                )
+                result = None
+            if result is not None:
+                if result.plates:
+                    result.diagnostics.setdefault("engine", getattr(self.primary, "name", "remote"))
+                    return result
+                # A confident empty answer is still an answer: the cloud looked
+                # and found no plate. Keep it rather than guessing locally.
+                result.diagnostics["engine"] = getattr(self.primary, "name", "remote")
+                return result
+
+        result = self.local.recognize(image_bytes, options)
+        result.diagnostics.setdefault("engine", "local")
+        return result
+
+
+def get_engine() -> FallbackEngine | ALPREngine:
     global _engine
     if _engine is None:
-        _engine = ALPREngine()
+        local = ALPREngine()
+        if settings.parkpow_configured:
+            from app.alpr.remote import ParkPowEngine
+
+            remote = ParkPowEngine(
+                settings.parkpow_api_key,
+                base_url=settings.parkpow_base_url,
+                timeout=settings.parkpow_timeout_seconds,
+                regions=tuple(settings.parkpow_region_list),
+                camera_id=settings.parkpow_camera_id,
+                retries=settings.parkpow_retries,
+            )
+            _engine = FallbackEngine(remote, local)
+            logger.info("remote reader enabled", extra={"endpoint": remote.endpoint})
+        else:
+            if settings.alpr_engine == "parkpow":
+                logger.warning(
+                    "ALPR_ENGINE=parkpow but PARKPOW_API_KEY is empty; running the local engine"
+                )
+            _engine = local
     return _engine
