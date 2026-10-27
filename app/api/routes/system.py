@@ -60,6 +60,17 @@ def health(db: DbSession) -> HealthOut:
         engine_ok = False
         checks["engine_error"] = str(exc)
 
+    # Which reader actually answered is the first question when accuracy looks
+    # wrong in production, so surface it in health rather than in a log file.
+    checks["engine_backend"] = "local"
+    checks["remote_reader"] = "off"
+    if settings.parkpow_configured:
+        checks["remote_reader"] = "on"
+        checks["remote_reader_endpoint"] = settings.parkpow_base_url
+    elif settings.alpr_engine == "parkpow":
+        checks["remote_reader"] = "missing-key"
+    checks["engine_backend"] = "parkpow" if settings.parkpow_configured else "local"
+
     status = "ok" if all([database_ok, storage_ok, engine_ok]) else "degraded"
     metrics.gauge("health_ok", 1.0 if status == "ok" else 0.0)
     return HealthOut(

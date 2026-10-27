@@ -45,6 +45,14 @@ services:
         value: "true"
       - key: BOOTSTRAP_ON_START
         value: "false"
+      # Optional hosted reader. Left commented and unset on purpose: the local
+      # OpenCV pipeline needs no credentials, and omitting the key keeps the
+      # deploy free and offline. Uncomment and set the key in the dashboard to
+      # route reads through Plate Recognizer instead.
+      # - key: ALPR_ENGINE
+      #   value: parkpow
+      # - key: PARKPOW_API_KEY
+      #   sync: false
       # SQLite permits one writer; scale with a managed Postgres before raising
       # this (the container forces 1 worker for SQLite regardless).
       - key: WEB_CONCURRENCY
