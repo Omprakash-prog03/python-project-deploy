@@ -1,0 +1,6 @@
+# Runtime dependencies. Deliberately small: Phase 0 makes no outbound
+# requests, so no HTTP client beyond FastAPI's own stack is required yet.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+httpx==0.28.1
