@@ -40,6 +40,36 @@ jobs:
       - name: Recognition accuracy gate
         run: python scripts/eval_alpr.py
 
+  media-fetcher:
+    name: Media Fetcher (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    defaults:
+      run:
+        working-directory: universal-media-fetcher
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: universal-media-fetcher/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check umf tests
+
+      - name: Tests
+        run: PYTHONPATH=. pytest tests
+
   postgres:
     name: Postgres integration
     runs-on: ubuntu-latest
